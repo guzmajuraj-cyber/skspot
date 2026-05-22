@@ -5,7 +5,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import io
 
-# Nastavenie konfigurácie stránky (Štýlový dizajn pre energetický portál)
+# Nastavenie konfigurácie stránky
 st.set_page_config(
     page_title="SpotCheck SK - Prepočet Spotovej Elektriny",
     page_icon="⚡",
@@ -48,29 +48,27 @@ st.markdown("""
 
 # --- POMOCNÉ FUNKCIE PRE LOGIKU ---
 
-@st.cache_data(ttl=86400)  # Cachovanie cien na 24 hodín, aby sme nepreťažovali API
+@st.cache_data(ttl=86400)  # Cachovanie cien na 24 hodín
 def stiahni_spotove_ceny(den_od, den_do, api_key):
     """Stiahne hodinové spotové ceny z ENTSO-E pre Slovensko v EUR/MWh"""
     if not api_key or api_key == "DEMO_MODE":
-        # Ak nie je zadaný kľúč, vygenerujeme realistické simulované ceny pre demo účely
         st.info("💡 Beží demo režim s modelovými spotovými cenami.")
         casovy_rozsah = pd.date_range(start=den_od, end=den_do, freq='1H', tz='Europe/Bratislava')
         mock_ceny = []
         for dt in casovy_rozsah:
             hodina = dt.hour
             if 8 <= hodina <= 11 or 18 <= hodina <= 21:
-                cena = 130.0  # EUR / MWh počas špičky
+                cena = 130.0  
             elif 1 <= hodina <= 5:
-                cena = 55.0   # Lacná nočná energia
+                cena = 55.0   
             else:
-                cena = 85.0   # Bežný denný priemer
+                cena = 85.0   
             mock_ceny.append({"cas": dt, "cena_eur_kwh": cena / 1000.0})
         
         df_ceny = pd.DataFrame(mock_ceny)
         df_ceny.set_index("cas", inplace=True)
         return df_ceny
 
-    # Reálne volanie ENTSO-E API
     url = "https://web-api.tp.entsoe.eu/api"
     EIC_SK = "10YDOM-1001A015R"
     
@@ -122,28 +120,35 @@ def parsuj_ssd_subor(uploaded_file):
     """Bezpečne načíta nahraný CSV/XLSX súbor z SSD a agreguje na hodiny"""
     try:
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, sep=None, engine='python')
+            try:
+                df = pd.read_csv(uploaded_file, sep=';', engine='python')
+            except:
+                df = pd.read_csv(uploaded_file, sep=None, engine='python')
         else:
             df = pd.read_excel(uploaded_file)
         
-        # --- BLBOVZDORNÁ VALIDÁCIA STÍTKOV ---
-        cas_col = None
-        spotreba_col = None
+        # Presné párovanie podľa reálnej hlavičky SSD z obrázku
+        cas_col = "Dátum a čas merania"
+        spotreba_col = "1.5.0 - Činný odber (kW)"
         
-        for col in df.columns:
-            col_lower = str(col).lower()
-            if 'cas' in col_lower or 'dátum' in col_lower or 'datum' in col_lower or 'period' in col_lower:
-                cas_col = col
-            if 'spotreba' in col_lower or 'kwh' in col_lower or 'hodnota' in col_lower or 'value' in col_lower:
-                spotreba_col = col
-                
-        if not cas_col or not spotreba_col:
-            st.error("❌ Súbor nemá správnu štruktúru. Uistite sa, že obsahuje stĺpce s časom a spotrebou (kWh).")
+        # Záloha pre prípad chýbajúcej diakritiky
+        if cas_col not in df.columns or spotreba_col not in df.columns:
+            for col in df.columns:
+                col_clean = str(col).lower().strip()
+                if 'dátum a čas' in col_clean or 'datum a cas' in col_clean:
+                    cas_col = col
+                if '1.5.0' in col_clean and 'odber' in col_clean:
+                    spotreba_col = col
+
+        if cas_col not in df.columns or spotreba_col not in df.columns:
+            st.error(f"❌ Súbor nemá očakávanú štruktúru SSD. Nenašli sa stĺpce pre čas alebo odber.")
             return None
             
+        # Výber a očistenie dát
         df = df[[cas_col, spotreba_col]].dropna()
-        df[cas_col] = pd.to_datetime(df[cas_col], errors='coerce')
-        df[spotreba_col] = pd.to_numeric(df[spotreba_col], errors='coerce')
+        
+        # Presný formát času zo snímky obrazovky
+        df[cas_col] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M", errors='coerce')
         df = df.dropna()
         df.set_index(cas_col, inplace=True)
         
@@ -152,15 +157,17 @@ def parsuj_ssd_subor(uploaded_file):
         else:
             df.index = df.index.tz_convert('Europe/Bratislava')
             
-        # Sčítanie 15-minútových odpočtov do hodinových blokov
-        df_hodina = df[spotreba_col].resample('1H').sum().to_frame(name='Spotreba_kWh')
+        # Agregácia 15-minútových periód na 1 hodinu (Korelácia s označením burzy)
+        df_hodina = df[spotreba_col].resample('1H', closed='right', label='right').sum().to_frame(name='Spotreba_kWh')
+        df_hodina.index = df_hodina.index - pd.Timedelta(hours=1)
+        
         return df_hodina
     except Exception as e:
         st.error(f"Chyba pri čítaní súboru: {str(e)}")
         return None
 
 def vygeneruj_vzorove_data():
-    """Generuje ukážkové dáta pre používateľov, ktorí nemajú vlastné CSV"""
+    """Generuje ukážkové dáta pre demo režim"""
     casovy_rozsah = pd.date_range(start="2026-05-01", end="2026-05-15", freq='15min', tz='Europe/Bratislava')
     import random
     random.seed(42)
@@ -304,5 +311,5 @@ with tabs[2]:
     st.write("""
     ### 💰 Ako vyťažiť zo spotového trhu maximum?
     * **Presun spotreby mimo špičky:** Najdrahšia elektrina býva ráno (8:00 - 10:00) a večer (18:00 - 21:00). Odložte umývačku alebo pranie na noc alebo poobedie.
-    * **Využitie batérie a FVE:** Nabíjajte batérie zo siete v noci za nízke ceny a spotrebúvajte ich počas drahej špičky.
+    * **Využitie batérie a FVE:** Nabíjajte batérie zo sieťového napájania v noci za nízke ceny a spotrebúvajte ich počas drahej špičky.
     """)

@@ -71,7 +71,6 @@ def stiahni_spotove_ceny(den_od, den_do):
             cena_kwh = cena_mwh / 1000.0      # Prepočet na EUR / kWh
             
             zaklad_dna = datetime.fromisoformat(den_str)
-            # Perióda 1 je čas 00:00 - 00:15, preto pripočítavame (perioda - 1) * 15 minút
             realny_cas = zaklad_dna + timedelta(minutes=(perioda - 1) * 15)
             
             ceny.append({"cas": realny_cas, "cena_eur_kwh": cena_kwh})
@@ -98,35 +97,29 @@ def stiahni_spotove_ceny(den_od, den_do):
 def parsuj_ssd_subor(uploaded_file):
     """Bezpečne načíta nahraný CSV/XLSX súbor z SSD a ponechá ho v 15-minútovom rozlíšení"""
     try:
-        # 1. Prvé zbežné načítanie pre nájdenie štartu tabuľky
+        # 1. Čítanie súboru
         if uploaded_file.name.endswith('.csv'):
             try:
-                raw_df = pd.read_csv(uploaded_file, sep=';', header=None, engine='python')
+                df = pd.read_csv(uploaded_file, sep=',', skiprows=0, engine='python')
             except:
-                raw_df = pd.read_csv(uploaded_file, sep=None, header=None, engine='python')
+                df = pd.read_csv(uploaded_file, sep=';', skiprows=0, engine='python')
         else:
-            raw_df = pd.read_excel(uploaded_file, header=None)
-            
-        # 2. Hľadanie riadku, kde začína reálna hlavička
-        header_row_index = 0
-        for idx, row in raw_df.iterrows():
-            row_str = str(row.values).lower()
-            if '1.5.0' in row_str or 'činný odber' in row_str or 'cinny odber' in row_str:
-                header_row_index = idx
-                break
-                
-        # 3. Načítanie naostro s preskočením úvodných textov
-        uploaded_file.seek(0)
-        if uploaded_file.name.endswith('.csv'):
-            try:
-                df = pd.read_csv(uploaded_file, sep=';', skiprows=header_row_index, engine='python')
-            except:
-                df = pd.read_csv(uploaded_file, sep=None, skiprows=header_row_index, engine='python')
-        else:
-            df = pd.read_excel(uploaded_file, skiprows=header_row_index)
+            df = pd.read_excel(uploaded_file, skiprows=0)
 
-        cas_col = "Dátum a čas merania"
-        spotreba_col = "1.5.0 - Činný odber (kW)"
+        # Ak sa na začiatku vyskytol nejaký divný riadok, skúsime nájsť hlavičku podľa názvu stĺpca
+        if "Dátum a čas merania" not in df.columns:
+            for idx, row in df.iterrows():
+                if "dátum a čas" in str(row.values).lower():
+                    uploaded_file.seek(0)
+                    if uploaded_file.name.endswith('.csv'):
+                        df = pd.read_csv(uploaded_file, sep=',', skiprows=idx+1, engine='python')
+                    else:
+                        df = pd.read_excel(uploaded_file, skiprows=idx+1)
+                    break
+
+        # Dynamické hľadanie stĺpcov
+        cas_col = None
+        spotreba_col = None
         
         for col in df.columns:
             col_clean = str(col).lower().replace('\xa0', ' ').strip()
@@ -135,38 +128,26 @@ def parsuj_ssd_subor(uploaded_file):
             if '1.5.0' in col_clean and 'odber' in col_clean:
                 spotreba_col = col
 
-        if cas_col not in df.columns or spotreba_col not in df.columns:
-            st.error(f"❌ Súbor nemá očakávanú štruktúru SSD. Nenašli sa stĺpce pre čas alebo odber.")
+        if not cas_col or not spotreba_col:
+            st.error(f"❌ Súbor nemá očakávanú štruktúru. Nenašli sa stĺpce pre čas alebo odber. Dostupné stĺpce: {list(df.columns)}")
             return None
             
-        # Výber stĺpcov
+        # Výber iba potrebných stĺpcov
         df = df[[cas_col, spotreba_col]].copy()
         
-        # Sériové testovanie konverzie na dátum (od najuniverzálnejšieho po špecifické)
-        # 1. Čistá automatika - ideálna pre ISO formát (YYYY-MM-DD) aj natívny Excel dátum
-        df['Cas_Parsed'] = pd.to_datetime(df[cas_col], errors='coerce')
+        # Konverzia dátumu pomocou flexibilného parsera (skvele zvláda YYYY-MM-DD HH:MM:SS)
+        df[cas_col] = pd.to_datetime(df[cas_col], errors='coerce')
         
-        # 2. Ak automatika zlyhala, skúsime formát s bodkami v dátume a dvojbodkou v čase
-        if df['Cas_Parsed'].isna().sum() == len(df):
-            df['Cas_Parsed'] = pd.to_datetime(df[cas_col].astype(str).str.strip(), format="%d.%m.%Y %H:%M", errors='coerce')
-            
-        # 3. Ak stále zlyháva, skúsime slovenský formát vrátane sekúnd
-        if df['Cas_Parsed'].isna().sum() == len(df):
-            df['Cas_Parsed'] = pd.to_datetime(df[cas_col].astype(str).str.strip(), format="%d.%m.%Y %H:%M:%S", errors='coerce')
-            
-        # Diagnostický výpis pre prípad núdze
-        if df['Cas_Parsed'].isna().sum() == len(df):
-            st.error(f"❌ Nepodarilo sa naparsovať dátum. Prvé hodnoty v stĺpci '{cas_col}' sú:")
-            st.code(df[cas_col].head(5).to_list())
+        # Konverzia spotreby na čísla, pričom prázdne hodnoty nahradíme nulou (aby dropna nezmazal riadok)
+        df[spotreba_col] = pd.to_numeric(df[spotreba_col], errors='coerce').fillna(0.0)
+        
+        # Vymažeme iba tie riadky, kde absolútne zlyhal dátum
+        df = df.dropna(subset=[cas_col])
+        
+        if df.empty:
+            st.error("❌ Po očistení dát nezostali žiadne platné riadky. Skontrolujte obsah súboru.")
             return None
-            
-        df[cas_col] = df['Cas_Parsed']
-        df = df.drop(columns=['Cas_Parsed'])
-        
-        # Prevod spotreby na čísla
-        df[spotreba_col] = pd.to_numeric(df[spotreba_col], errors='coerce')
-        
-        df = df.dropna()
+
         df.set_index(cas_col, inplace=True)
         
         if df.index.tz is None:
@@ -174,10 +155,10 @@ def parsuj_ssd_subor(uploaded_file):
         else:
             df.index = df.index.tz_convert('Europe/Bratislava')
             
-        # Prepočet: Výkon v kW prepočítame na energiu v kWh za 15 minút (kW * 0.25)
+        # Výkon v kW na energiu v kWh za 15 minút (kW * 0.25)
         df['Spotreba_kWh'] = df[spotreba_col] * 0.25
         
-        # Posun indexu o 15 minút dozadu pre dokonalé spárovanie s OKTE.
+        # Posun indexu o 15 minút dozadu pre OKTE spárovanie
         df_15min = df[['Spotreba_kWh']].copy()
         df_15min.index = df_15min.index - pd.Timedelta(minutes=15)
         
@@ -252,9 +233,8 @@ with tabs[0]:
         min_date = df_spotreba.index.min()
         max_date = df_spotreba.index.max()
         
-        # Bezpečnostná poistka pre overenie platnosti rozsahov dátumov
         if pd.isna(min_date) or pd.isna(max_date):
-            st.error("❌ Nepodarilo sa správne načítať dátumy zo súboru. Skontrolujte, či stĺpec s časom obsahuje platné formáty.")
+            st.error("❌ Nepodarilo sa určiť časový rozsah dát. Skontrolujte formát dátumov.")
         else:
             with st.spinner("⏳ Sťahujem a párujem 15-minútové spotové ceny priamo z OKTE..."):
                 df_ceny = stiahni_spotove_ceny(min_date, max_date)
@@ -313,7 +293,7 @@ with tabs[0]:
                         mime="text/csv"
                     )
                 else:
-                    st.error("Chyba: Nepodarilo sa spárovať dáta o spotrebe.")
+                    st.error("Chyba: Nepodarilo sa spárovať dáta o spotrebe s trhovými cenami OKTE.")
 
 with tabs[1]:
     st.write("""
@@ -328,6 +308,6 @@ with tabs[1]:
 with tabs[2]:
     st.write("""
     ### 💰 Ako vyťažiť zo spotového trhu maximum?
-    * **Presun spotreby mimo špičky:** Najdrahšia elektrina býva ráno (8:00 - 10:00) a večer (18:00 - 21:00). Odložte umývačku alebo pranie na noc alebo poobedie.
+    * **Presun spotreby mimo špičky:** Najdrahšia elektrina býva ráno (8:00 - 10:00) and večer (18:00 - 21:00). Odložte umývačku alebo pranie na noc alebo poobedie.
     * **Využitie batérie a FVE:** Nabíjajte batérie zo sieťového napájania v noci za nízke ceny a spotrebúvajte ich počas drahej špičky.
     """)

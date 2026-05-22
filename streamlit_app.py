@@ -211,7 +211,12 @@ marza_dodavatela = st.sidebar.slider(
 ) / 1000.0
 
 # --- HLAVNÝ OBSAH ---
-tabs = st.tabs(["📊 Analýza a Porovnanie", "💡 Ako získať dáta z SSD?", "💰 Možnosti Úspory"])
+tabs = st.tabs([
+    "📊 Analýza a Porovnanie", 
+    "👀 Kontrola načítaných dát",
+    "💡 Ako získať dáta z SSD?", 
+    "💰 Možnosti Úspory"
+])
 
 with tabs[0]:
     col_left, col_right = st.columns([1, 2])
@@ -297,6 +302,33 @@ with tabs[0]:
                     st.error("Chyba: Nepodarilo sa spárovať dáta o spotrebe s trhovými cenami OKTE.")
 
 with tabs[1]:
+    st.write("### 👀 Kontrola spracovaných dát")
+    if df_spotreba is not None:
+        st.info(f"📊 **Štatistika súboru:** V tabuľke sa nachádza celkovo **{len(df_spotreba)} riadkov** s 15-minútovými záznamami.")
+        
+        # Vytvoríme prehľadnú tabuľku na zobrazenie pre používateľa
+        df_view = df_spotreba.copy()
+        df_view.index = df_view.index.strftime('%Y-%m-%d %H:%M:%S')
+        df_view.index.name = 'Dátum a Čas (upravený pre OKTE)'
+        df_view.columns = ['Spotreba (kWh za 15 min)']
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.write("#### 🕒 Začiatok merania (Prvých 10 riadkov)")
+            st.dataframe(df_view.head(10), use_container_width=True)
+            
+        with c2:
+            st.write("#### 🚀 Koniec merania (Posledných 10 riadkov)")
+            st.dataframe(df_view.tail(10), use_container_width=True)
+            
+        st.write("#### 📈 Rýchly prehľad hodnôt spotreby (kWh)")
+        st.dataframe(df_spotreba.describe().T[['mean', 'min', 'max', 'sum']].rename(
+            columns={'mean': 'Priemer (kWh)', 'min': 'Minimum (kWh)', 'max': 'Maximum (kWh)', 'sum': 'Suma spolu (kWh)'}
+        ), use_container_width=True)
+    else:
+        st.warning("📂 Najprv nahrajte súbor alebo začiarknite Demo ukážku na prvej karte, aby sa tu zobrazili dáta.")
+
+with tabs[2]:
     st.write("""
     ### 📑 Ako stiahnuť 15-minútové dáta zo Stredoslovenskej distribučnej?
     1. Prihláste sa do svojho zákazníckeho konta na portáli **Distančné odpočty SSD**.
@@ -306,7 +338,7 @@ with tabs[1]:
     5. Nahrajte súbor na prvej karte tejto aplikácie.
     """)
 
-with tabs[2]:
+with tabs[3]:
     st.write("""
     ### 💰 Ako vyťažiť zo spotového trhu maximum?
     * **Presun spotreby mimo špičky:** Najdrahšia elektrina býva ráno (8:00 - 10:00) a večer (18:00 - 21:00). Odložte umývačku alebo pranie na noc alebo poobedie.

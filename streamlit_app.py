@@ -158,4 +158,129 @@ def vygeneruj_vzorove_data():
             zaklad = 0.1
         spotreba = zaklad + random.uniform(0.0, 0.3)
         # Generujeme rovno hodnotu, akoby prešla prepočtom na kWh
-        data.append({"Čas": dt, "Spotreba_kWh": round(spotreba *
+        data.append({"Čas": dt, "Spotreba_kWh": round(spotreba * 0.25, 3)})
+        
+    df_demo = pd.DataFrame(data)
+    df_demo.set_index("Čas", inplace=True)
+    return df_demo
+
+# --- HLAVNÉ ROZHRANIE APLIKÁCIE ---
+
+st.markdown('<div class="main-title">⚡ SpotCheck Slovensko</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Zistite okamžite a nezáväzne, či by sa vám oplatil prechod na spotové ceny elektriny na základe vašich reálnych dát z inteligentného elektromeru.</div>', unsafe_allow_html=True)
+
+# --- SIDEBAR (NASTAVENIA) ---
+st.sidebar.header("⚙️ Nastavenia a Konfigurácia")
+
+st.sidebar.subheader("💶 Porovnávacie parametre")
+cena_fix_input = st.sidebar.slider(
+    "Vaša súčasná fixovaná cena komodity (v centoch/kWh s DPH)",
+    min_value=10.0, max_value=25.0, value=16.5, step=0.5
+)
+cena_fix_eur = cena_fix_input / 100.0
+
+marza_dodavatela = st.sidebar.slider(
+    "Odhadovaná marža spotového dodávateľa (EUR/MWh)",
+    min_value=5, max_value=25, value=15, step=1
+) / 1000.0
+
+# --- HLAVNÝ OBSAH ---
+tabs = st.tabs(["📊 Analýza a Porovnanie", "💡 Ako získať dáta z SSD?", "💰 Možnosti Úspory"])
+
+with tabs[0]:
+    col_left, col_right = st.columns([1, 2])
+    
+    with col_left:
+        st.write("### 📂 Krok 1: Nahrajte dáta")
+        uploaded_file = st.file_uploader(
+            "Nahrajte export (CSV alebo XLSX) z portálu Stredoslovenskej distribučnej (SSD)", 
+            type=["csv", "xlsx"]
+        )
+        use_demo = st.checkbox("Nemám pri sebe súbor, použiť **Demo ukážku** (1. - 15. Máj)")
+        
+    df_spotreba = None
+    if uploaded_file is not None:
+        df_spotreba = parsuj_ssd_subor(uploaded_file)
+    elif use_demo:
+        df_spotreba = vygeneruj_vzorove_data()
+        
+    if df_spotreba is not None:
+        min_date = df_spotreba.index.min()
+        max_date = df_spotreba.index.max()
+        
+        with st.spinner("⏳ Sťahujem a párujem 15-minútové spotové ceny priamo z OKTE..."):
+            df_ceny = stiahni_spotove_ceny(min_date, max_date)
+            
+        if df_ceny is not None:
+            df_final = df_spotreba.join(df_ceny, how='inner')
+            
+            if not df_final.empty:
+                df_final['Cena_Spot_Koncova'] = df_final['cena_eur_kwh'] + marza_dodavatela
+                df_final['Naklady_Spot_EUR'] = df_final['Spotreba_kWh'] * df_final['Cena_Spot_Koncova']
+                df_final['Naklady_Fix_EUR'] = df_final['Spotreba_kWh'] * cena_fix_eur
+                
+                celkova_spotreba = df_final['Spotreba_kWh'].sum()
+                naklady_spot_total = df_final['Naklady_Spot_EUR'].sum()
+                naklady_fix_total = df_final['Naklady_Fix_EUR'].sum()
+                
+                uspora = naklady_fix_total - naklady_spot_total
+                priemerna_cena_spot = naklady_spot_total / celkova_spotreba if celkova_spotreba > 0 else 0
+                
+                st.write("### 📈 Krok 2: Finálny verdikt")
+                if uspora > 0:
+                    st.success(f"🎉 Na spote by ste za toto obdobie **UŠETRILI {uspora:.2f} EUR** oproti vášmu fixu!")
+                else:
+                    st.warning(f"⚠️ Pri vašom aktuálnom profile by ste na spote **PREPLATILI {abs(uspora):.2f} EUR**. Oplatí sa zostať pri fixe.")
+                    
+                m_col1, m_col2, m_col3 = st.columns(3)
+                with m_col1:
+                    st.markdown(f'<div class="metric-card"><div class="metric-label">Celková Spotreba</div><div class="metric-value">{celkova_spotreba:.1f} kWh</div></div>', unsafe_allow_html=True)
+                with m_col2:
+                    st.markdown(f'<div class="metric-card"><div class="metric-label">Priemerná cena na Spote</div><div class="metric-value">{priemerna_cena_spot*100:.2f} ct/kWh</div></div>', unsafe_allow_html=True)
+                with m_col3:
+                    st.markdown(f'<div class="metric-card" style="border-left-color: #10B981;"><div class="metric-label">Vaša fixná cena</div><div class="metric-value">{cena_fix_input:.2f} ct/kWh</div></div>', unsafe_allow_html=True)
+                
+                st.write("### 📊 Priebeh spotreby a trhových cien")
+                df_graf = df_final.copy()
+                if len(df_graf) > 500:
+                    # Ak je dát príliš veľa (napr. celý rok), zosumarizujeme ich na dni, aby graf netrhal
+                    df_graf_resampled = pd.DataFrame({
+                        'Denná Spotreba (kWh)': df_graf['Spotreba_kWh'].resample('d').sum(),
+                        'Priemerná Denná Cena (EUR/MWh)': (df_graf['cena_eur_kwh'] * 1000).resample('d').mean()
+                    })
+                    st.line_chart(df_graf_resampled, height=350)
+                else:
+                    df_graf_visual = pd.DataFrame({
+                        'Spotreba (kWh)': df_graf['Spotreba_kWh'],
+                        'Spotová cena (ct/kWh)': df_graf['Cena_Spot_Koncova'] * 100
+                    })
+                    st.line_chart(df_graf_visual, height=350)
+                
+                st.write("### 📥 Stiahnuť detailný report")
+                csv_buffer = io.StringIO()
+                df_final[['Spotreba_kWh', 'Cena_Spot_Koncova', 'Naklady_Spot_EUR', 'Naklady_Fix_EUR']].to_csv(csv_buffer)
+                st.download_button(
+                    label="Stiahnuť prepočítané dáta (CSV)",
+                    data=csv_buffer.getvalue(),
+                    file_name="spotcheck_vysledky.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.error("Chyba: Nepodarilo sa spárovať dáta o spotrebe.")
+
+with tabs[1]:
+    st.write("""
+    ### 📑 Ako stiahnuť 15-minútové dáta zo Stredoslovenskej distribučnej?
+    1. Prihláste sa do svojho zákazníckeho konta na portáli **Distančné odpočty SSD**.
+    2. Prejdite do sekcie **Prehľad meraní / História spotreby**.
+    3. Vyberte požadované obdobie (odporúča sa aspoň 1 celý mesiac).
+    4. Zvoľte formát exportu **CSV** alebo **Excel (XLSX)** a uložte súbor.
+    5. Nahrajte súbor na prvej karte tejto aplikácie.
+    """)
+
+with tabs[2]:
+    st.write("""
+    ### 💰 Ako vyťažiť zo spotového trhu maximum?
+    * **Presun spotreby mimo špičky:** Najdrahšia elektrina býva ráno (8:00 - 10:00) a večer (18:00 - 21:00). Odložte umývačku alebo pranie na noc alebo poobedie.
+    * **Využitie batérie a FVE:** Nabíjajte batérie zo sieťového napájania v noci za nízke ceny a spotrebúvajte ich počas drahej špičky.
+    """)

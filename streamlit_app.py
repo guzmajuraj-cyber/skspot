@@ -53,7 +53,7 @@ def stiahni_spotove_ceny(den_od, den_do, api_key):
     """Stiahne hodinové spotové ceny z ENTSO-E pre Slovensko v EUR/MWh"""
     if not api_key or api_key == "DEMO_MODE":
         st.info("💡 Beží demo režim s modelovými spotovými cenami.")
-        casovy_rozsah = pd.date_range(start=den_od, end=den_do, freq='1H', tz='Europe/Bratislava')
+        casovy_rozsah = pd.date_range(start=den_od, end=den_do, freq='h', tz='Europe/Bratislava')
         mock_ceny = []
         for dt in casovy_rozsah:
             hodina = dt.hour
@@ -158,7 +158,7 @@ def parsuj_ssd_subor(uploaded_file):
             df.index = df.index.tz_convert('Europe/Bratislava')
             
         # Agregácia 15-minútových periód na 1 hodinu (Korelácia s označením burzy)
-        df_hodina = df[spotreba_col].resample('1H', closed='right', label='right').sum().to_frame(name='Spotreba_kWh')
+        df_hodina = df[spotreba_col].resample('h', closed='right', label='right').sum().to_frame(name='Spotreba_kWh')
         df_hodina.index = df_hodina.index - pd.Timedelta(hours=1)
         
         return df_hodina
@@ -184,7 +184,7 @@ def vygeneruj_vzorove_data():
         
     df_demo = pd.DataFrame(data)
     df_demo.set_index("Čas", inplace=True)
-    return df_demo.resample('1H').sum()
+    return df_demo.resample('h').sum()
 
 # --- HLAVNÉ ROZHRANIE APLIKÁCIE ---
 

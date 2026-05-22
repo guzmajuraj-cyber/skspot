@@ -129,7 +129,7 @@ def parsuj_ssd_subor(uploaded_file):
         spotreba_col = "1.5.0 - Činný odber (kW)"
         
         for col in df.columns:
-            col_clean = str(col).lower().strip()
+            col_clean = str(col).lower().replace('\xa0', ' ').strip()
             if 'dátum a čas' in col_clean or 'datum a cas' in col_clean:
                 cas_col = col
             if '1.5.0' in col_clean and 'odber' in col_clean:
@@ -140,21 +140,30 @@ def parsuj_ssd_subor(uploaded_file):
             return None
             
         # Výber stĺpcov
-        df = df[[cas_col, spotreba_col]]
+        df = df[[cas_col, spotreba_col]].copy()
         
-        # Sériové testovanie formátov od tvojho presného formátu s dvojbodkou
-        # 1. Presný formát: DD.MM.RRRR HH:MM
-        df[cas_col] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M", errors='coerce')
+        # Očistenie hodnôt od neviditeľných medzier a prevod na text pre stabilný parsing
+        df[cas_col] = df[cas_col].astype(str).str.strip()
         
-        # 2. Ak by tam Excel potajomky pribalil sekundy: DD.MM.RRRR HH:MM:SS
-        if df[cas_col].isna().sum() == len(df):
-            df[cas_col] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M:%S", errors='coerce')
+        # Sériové testovanie konverzie na dátum
+        df['Cas_Parsed'] = pd.to_datetime(df[cas_col], errors='coerce')
+        
+        if df['Cas_Parsed'].isna().sum() == len(df):
+            df['Cas_Parsed'] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M", errors='coerce')
             
-        # 3. Ak zlyhalo, skúsime automatiku pre natívny Excel dátumový typ
-        if df[cas_col].isna().sum() == len(df):
-            df[cas_col] = pd.to_datetime(df[cas_col], errors='coerce')
+        if df['Cas_Parsed'].isna().sum() == len(df):
+            df['Cas_Parsed'] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M:%S", errors='coerce')
             
-        # Prevod spotreby na čísla (všetky textové chyby a pomlčky sa premenia na NaN)
+        # Diagnostický výpis, ak zlyhajú všetky pokusy
+        if df['Cas_Parsed'].isna().sum() == len(df):
+            st.error(f"❌ Nepodarilo sa naparsovať dátum. Prvé hodnoty v stĺpci '{cas_col}' sú:")
+            st.code(df[cas_col].head(5).to_list())
+            return None
+            
+        df[cas_col] = df['Cas_Parsed']
+        df = df.drop(columns=['Cas_Parsed'])
+        
+        # Prevod spotreby na čísla
         df[spotreba_col] = pd.to_numeric(df[spotreba_col], errors='coerce')
         
         df = df.dropna()
@@ -202,7 +211,7 @@ def vygeneruj_vzorove_data():
 # --- HLAVNÉ ROZHRANIE APLIKÁCIE ---
 
 st.markdown('<div class="main-title">⚡ SpotCheck Slovensko</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Zistite okamžite a nezáväzne, či by sa vám oplatil prechod na spotové ceny elektriny na záklasde vašich reálnych dát z inteligentného elektromeru.</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Zistite okamžite a nezáväzne, či by sa vám oplatil prechod na spotové ceny elektriny na základe vašich reálnych dát z inteligentného elektromeru.</div>', unsafe_allow_html=True)
 
 # --- SIDEBAR (NASTAVENIA) ---
 st.sidebar.header("⚙️ Nastavenia a Konfigurácia")

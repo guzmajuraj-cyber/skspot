@@ -138,7 +138,8 @@ def parsuj_ssd_subor(uploaded_file):
         # Konverzia dátumu pomocou flexibilného parsera (skvele zvláda YYYY-MM-DD HH:MM:SS)
         df[cas_col] = pd.to_datetime(df[cas_col], errors='coerce')
         
-        # Konverzia spotreby na čísla, pričom prázdne hodnoty nahradíme nulou (aby dropna nezmazal riadok)
+        # Očistenie formátu čísel (zmena prípadných čiarok na bodky a odstránenie textového balastu)
+        df[spotreba_col] = df[spotreba_col].astype(str).str.replace(',', '.').str.strip()
         df[spotreba_col] = pd.to_numeric(df[spotreba_col], errors='coerce').fillna(0.0)
         
         # Vymažeme iba tie riadky, kde absolútne zlyhal dátum
@@ -308,6 +309,6 @@ with tabs[1]:
 with tabs[2]:
     st.write("""
     ### 💰 Ako vyťažiť zo spotového trhu maximum?
-    * **Presun spotreby mimo špičky:** Najdrahšia elektrina býva ráno (8:00 - 10:00) and večer (18:00 - 21:00). Odložte umývačku alebo pranie na noc alebo poobedie.
+    * **Presun spotreby mimo špičky:** Najdrahšia elektrina býva ráno (8:00 - 10:00) a večer (18:00 - 21:00). Odložte umývačku alebo pranie na noc alebo poobedie.
     * **Využitie batérie a FVE:** Nabíjajte batérie zo sieťového napájania v noci za nízke ceny a spotrebúvajte ich počas drahej špičky.
     """)

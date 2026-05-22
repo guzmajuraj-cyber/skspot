@@ -246,23 +246,40 @@ with tabs[0]:
             st.write("#### 💶 Vývoj ceny na spotovom trhu OKTE (centy/kWh s DPH)")
             df_graf['Spotová cena (ct/kWh)'] = df_graf['Cena_Spot_Koncova'] * 100
             st.line_chart(df_graf[['Spotová cena (ct/kWh)']], height=200, color="#FF9F43")
-
 with tabs[1]:
     st.write("### 👀 Kontrola spracovaných dát")
     if df_spotreba is not None:
-        st.write("#### 🕒 Posledné načítané riadky z tvojho súboru:")
-        st.dataframe(df_spotreba.tail(5))
+        st.info(f"📊 **Štatistika súboru:** V tabuľke sa nachádza celkovo **{len(df_spotreba)} riadkov** s 15-minútovými záznamami.")
         
-        # DEBUG VÝPIS STIAHNUTÝCH CIEN Z OKTE
-        st.write("#### 🔍 Kontrola API OKTE (Stiahnuté trhové ceny):")
+        # Príprava tabuľky vašej spotreby na zobrazenie
+        df_view = df_spotreba.copy()
+        df_view.index = df_view.index.strftime('%Y-%m-%d %H:%M:%S')
+        df_view.index.name = 'Dátum a Čas (upravený pre OKTE)'
+        df_view.columns = ['Odber (kWh / 15min)', 'Dodávka FVE (kWh / 15min)']
+        
+        # ZOBRAZENIE VŠETKÝCH RIADKOV SPOTREBY
+        st.write("#### 📋 Kompletné namerané dáta z vášho súboru (Odber a Dodávka):")
+        # height=None prinúti tabuľku roztiahnuť sa na všetky riadky bez vnútorného scrollbaru, ak ich je okolo 96
+        st.dataframe(df_view, use_container_width=True)
+        
+        # ZOBRAZENIE VŠETKÝCH RIADKOV STIAHNUTÝCH CIEN Z OKTE
+        st.write("#### 🔍 Kontrola API OKTE (Kompletné stiahnuté trhové ceny):")
         if df_ceny_debug is not None:
             df_ceny_view = df_ceny_debug.copy()
-            df_ceny_view['Cena v centoch/kWh'] = df_ceny_view['cena_eur_kwh'] * 100
-            st.dataframe(df_ceny_view.head(5))
+            df_ceny_view.index = df_ceny_view.index.strftime('%Y-%m-%d %H:%M:%S')
+            df_ceny_view.index.name = 'Čas platnosti ceny'
+            df_ceny_view['Cena v centoch/kWh (bez marže)'] = df_ceny_view['cena_eur_kwh'] * 100
+            
+            # Zobrazíme kompletnú tabuľku cien zo serveru OKTE
+            st.dataframe(df_ceny_view[['Cena v centoch/kWh (bez marže)']], use_container_width=True)
         else:
-            st.error("❌ Žiadne ceny z OKTE neboli stiahnuté. Skontroluj internetové pripojenie aplikácie alebo rozsah dátumov.")
+            st.error("❌ Žiadne ceny z OKTE neboli stiahnuté. Skontrolujte internetové pripojenie aplikácie alebo rozsah dátumov.")
+            
+        # Rýchly prehľad (Suma, priemer, min, max) zostáva pre kontrolu na spodku karty
+        st.write("#### 📈 Rýchly prehľad hodnôt (Súhrnné sumy a priemery)")
+        st.dataframe(df_spotreba.describe().T[['mean', 'min', 'max', 'sum']].rename(
+            index={'Spotreba_kWh': 'Odber (Suma spotreby v kWh)', 'Dodavka_kWh': 'Dodávka (Suma prebytkov FVE v kWh)'},
+            columns={'mean': 'Priemer na 15-min', 'min': 'Minimum', 'max': 'Maximum', 'sum': 'Suma spolu za celé obdobie'}
+        ), use_container_width=True)
     else:
         st.warning("📂 Najprv nahrajte súbor.")
-
-with tabs[2]:
-    st.write("Postup stiahnutia dát z portálu SSD...")

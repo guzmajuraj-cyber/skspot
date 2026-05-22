@@ -97,27 +97,33 @@ def stiahni_spotove_ceny(den_od, den_do):
 def parsuj_ssd_subor(uploaded_file):
     """Bezpečne načíta nahraný CSV/XLSX súbor z SSD a ponechá ho v 15-minútovom rozlíšení"""
     try:
-        # 1. Čítanie súboru
-        if uploaded_file.name.endswith('.csv'):
-            try:
-                df = pd.read_csv(uploaded_file, sep=',', skiprows=0, engine='python')
-            except:
-                df = pd.read_csv(uploaded_file, sep=';', skiprows=0, engine='python')
-        else:
+        # 1. Čítanie súboru - skúsime najprv čiarku, potom bodkočiarku
+        try:
+            df = pd.read_csv(uploaded_file, sep=',', skiprows=0, engine='python')
+        except:
+            uploaded_file.seek(0)
+            df = pd.read_csv(uploaded_file, sep=';', skiprows=0, engine='python')
+
+        if df.empty or len(df.columns) < 2:
+            uploaded_file.seek(0)
             df = pd.read_excel(uploaded_file, skiprows=0)
 
-        # Ak sa na začiatku vyskytol nejaký divný riadok, skúsime nájsť hlavičku podľa názvu stĺpca
+        # Ak sa na začiatku vyskytol nejaký balast, skúsime reálne nájsť hlavičku
         if "Dátum a čas merania" not in df.columns:
             for idx, row in df.iterrows():
-                if "dátum a čas" in str(row.values).lower():
+                if "dátum a čas" in str(row.values).lower() or "datum a cas" in str(row.values).lower():
                     uploaded_file.seek(0)
                     if uploaded_file.name.endswith('.csv'):
-                        df = pd.read_csv(uploaded_file, sep=',', skiprows=idx+1, engine='python')
+                        try:
+                            df = pd.read_csv(uploaded_file, sep=',', skiprows=idx+1, engine='python')
+                        except:
+                            uploaded_file.seek(0)
+                            df = pd.read_csv(uploaded_file, sep=';', skiprows=idx+1, engine='python')
                     else:
                         df = pd.read_excel(uploaded_file, skiprows=idx+1)
                     break
 
-        # Dynamické hľadanie stĺpcov
+        # Dynamické hľadanie stĺpcov podľa kľúčových slov
         cas_col = None
         spotreba_col = None
         
@@ -138,8 +144,11 @@ def parsuj_ssd_subor(uploaded_file):
         # Konverzia dátumu pomocou flexibilného parsera (skvele zvláda YYYY-MM-DD HH:MM:SS)
         df[cas_col] = pd.to_datetime(df[cas_col], errors='coerce')
         
-        # Očistenie formátu čísel (zmena prípadných čiarok na bodky a odstránenie textového balastu)
-        df[spotreba_col] = df[spotreba_col].astype(str).str.replace(',', '.').str.strip()
+        # INTELIGENTNÁ KONVERZIA SPOTREBY:
+        # Ak je stĺpec už načítaný ako číslo, nesiahame naň. Ak je to objekt/text, vyčistíme čiarky.
+        if df[spotreba_col].dtype == 'object':
+            df[spotreba_col] = df[spotreba_col].astype(str).str.replace(',', '.').str.strip()
+            
         df[spotreba_col] = pd.to_numeric(df[spotreba_col], errors='coerce').fillna(0.0)
         
         # Vymažeme iba tie riadky, kde absolútne zlyhal dátum
@@ -306,7 +315,6 @@ with tabs[1]:
     if df_spotreba is not None:
         st.info(f"📊 **Štatistika súboru:** V tabuľke sa nachádza celkovo **{len(df_spotreba)} riadkov** s 15-minútovými záznamami.")
         
-        # Vytvoríme prehľadnú tabuľku na zobrazenie pre používateľa
         df_view = df_spotreba.copy()
         df_view.index = df_view.index.strftime('%Y-%m-%d %H:%M:%S')
         df_view.index.name = 'Dátum a Čas (upravený pre OKTE)'

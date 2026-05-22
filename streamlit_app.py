@@ -1,1 +1,308 @@
+import streamlit as st
+import pandas as pd
+import requests
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
+import io
 
+# Nastavenie konfigurácie stránky (Štýlový dizajn pre energetický portál)
+st.set_page_config(
+    page_title="SpotCheck SK - Prepočet Spotovej Elektriny",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# --- INLINE CSS PRE KUSTOMIZÁCIU VZHĽADU ---
+st.markdown("""
+    <style>
+    .main-title {
+        font-size: 2.5rem;
+        color: #1E3A8A;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+    .sub-title {
+        font-size: 1.1rem;
+        color: #4B5563;
+        margin-bottom: 2rem;
+    }
+    .metric-card {
+        background-color: #F3F4F6;
+        padding: 1.5rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        border-left: 5px solid #3B82F6;
+    }
+    .metric-value {
+        font-size: 1.8rem;
+        font-weight: bold;
+        color: #111827;
+    }
+    .metric-label {
+        font-size: 0.9rem;
+        color: #6B7280;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- POMOCNÉ FUNKCIE PRE LOGIKU ---
+
+@st.cache_data(ttl=86400)  # Cachovanie cien na 24 hodín, aby sme nepreťažovali API
+def stiahni_spotove_ceny(den_od, den_do, api_key):
+    """Stiahne hodinové spotové ceny z ENTSO-E pre Slovensko v EUR/MWh"""
+    if not api_key or api_key == "DEMO_MODE":
+        # Ak nie je zadaný kľúč, vygenerujeme realistické simulované ceny pre demo účely
+        st.info("💡 Beží demo režim s modelovými spotovými cenami.")
+        casovy_rozsah = pd.date_range(start=den_od, end=den_do, freq='1H', tz='Europe/Bratislava')
+        mock_ceny = []
+        for dt in casovy_rozsah:
+            hodina = dt.hour
+            if 8 <= hodina <= 11 or 18 <= hodina <= 21:
+                cena = 130.0  # EUR / MWh počas špičky
+            elif 1 <= hodina <= 5:
+                cena = 55.0   # Lacná nočná energia
+            else:
+                cena = 85.0   # Bežný denný priemer
+            mock_ceny.append({"cas": dt, "cena_eur_kwh": cena / 1000.0})
+        
+        df_ceny = pd.DataFrame(mock_ceny)
+        df_ceny.set_index("cas", inplace=True)
+        return df_ceny
+
+    # Reálne volanie ENTSO-E API
+    url = "https://web-api.tp.entsoe.eu/api"
+    EIC_SK = "10YDOM-1001A015R"
+    
+    start_utc = den_od.astimezone('UTC')
+    end_utc = den_do.astimezone('UTC')
+
+    params = {
+        "securityToken": api_key,
+        "documentType": "A44",
+        "in_Domain": EIC_SK,
+        "out_Domain": EIC_SK,
+        "periodStart": start_utc.strftime("%Y%m%d%H%M"),
+        "periodEnd": end_utc.strftime("%Y%m%d%H%M")
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=15)
+        if response.status_code != 200:
+            st.error(f"Chyba ENTSO-E API: {response.text}")
+            return None
+            
+        root = ET.fromstring(response.content)
+        ns = {'ns': 'urn:iec62325.351:tc57wg16:451-3:alloweddocument:7:1'}
+        
+        ceny = []
+        for period in root.findall('.//ns:Period', ns):
+            start_str = period.find('ns:timeInterval/ns:start', ns).text
+            start_dt = datetime.strptime(start_str, "%Y-%m-%dT%H:%MZ")
+            
+            for point in period.findall('ns:Point', ns):
+                pozicia = int(point.find('ns:position', ns).text) - 1
+                cena_mwh = float(point.find('ns:price.amount', ns).text)
+                cena_kwh = cena_mwh / 1000.0
+                
+                cas_hodiny = start_dt + timedelta(hours=pozicia)
+                ceny.append({"cas": cas_hodiny, "cena_eur_kwh": cena_kwh})
+                
+        df_ceny = pd.DataFrame(ceny)
+        if df_ceny.empty:
+            return None
+        df_ceny.set_index("cas", inplace=True)
+        df_ceny.index = df_ceny.index.tz_localize('UTC').tz_convert('Europe/Bratislava')
+        return df_ceny
+    except Exception as e:
+        st.error(f"Nepodarilo sa stiahnuť ceny: {str(e)}")
+        return None
+
+def parsuj_ssd_subor(uploaded_file):
+    """Bezpečne načíta nahraný CSV/XLSX súbor z SSD a agreguje na hodiny"""
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file, sep=None, engine='python')
+        else:
+            df = pd.read_excel(uploaded_file)
+        
+        # --- BLBOVZDORNÁ VALIDÁCIA STÍTKOV ---
+        cas_col = None
+        spotreba_col = None
+        
+        for col in df.columns:
+            col_lower = str(col).lower()
+            if 'cas' in col_lower or 'dátum' in col_lower or 'datum' in col_lower or 'period' in col_lower:
+                cas_col = col
+            if 'spotreba' in col_lower or 'kwh' in col_lower or 'hodnota' in col_lower or 'value' in col_lower:
+                spotreba_col = col
+                
+        if not cas_col or not spotreba_col:
+            st.error("❌ Súbor nemá správnu štruktúru. Uistite sa, že obsahuje stĺpce s časom a spotrebou (kWh).")
+            return None
+            
+        df = df[[cas_col, spotreba_col]].dropna()
+        df[cas_col] = pd.to_datetime(df[cas_col], errors='coerce')
+        df[spotreba_col] = pd.to_numeric(df[spotreba_col], errors='coerce')
+        df = df.dropna()
+        df.set_index(cas_col, inplace=True)
+        
+        if df.index.tz is None:
+            df.index = df.index.tz_localize('Europe/Bratislava', ambiguous='NaT', nonexistent='NaT')
+        else:
+            df.index = df.index.tz_convert('Europe/Bratislava')
+            
+        # Sčítanie 15-minútových odpočtov do hodinových blokov
+        df_hodina = df[spotreba_col].resample('1H').sum().to_frame(name='Spotreba_kWh')
+        return df_hodina
+    except Exception as e:
+        st.error(f"Chyba pri čítaní súboru: {str(e)}")
+        return None
+
+def vygeneruj_vzorove_data():
+    """Generuje ukážkové dáta pre používateľov, ktorí nemajú vlastné CSV"""
+    casovy_rozsah = pd.date_range(start="2026-05-01", end="2026-05-15", freq='15min', tz='Europe/Bratislava')
+    import random
+    random.seed(42)
+    
+    data = []
+    for dt in casovy_rozsah:
+        hodina = dt.hour
+        if 7 <= hodina <= 9 or 17 <= hodina <= 22:
+            zaklad = 0.4
+        else:
+            zaklad = 0.1
+        spotreba = zaklad + random.uniform(0.0, 0.3)
+        data.append({"Čas": dt, "Spotreba_kWh": round(spotreba, 3)})
+        
+    df_demo = pd.DataFrame(data)
+    df_demo.set_index("Čas", inplace=True)
+    return df_demo.resample('1H').sum()
+
+# --- HLAVNÉ ROZHRANIE APLIKÁCIE ---
+
+st.markdown('<div class="main-title">⚡ SpotCheck Slovensko</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Zistite okamžite a nezáväzne, či by sa vám oplatil prechod na spotové ceny elektriny na základe vašich reálnych dát z inteligentného elektromeru.</div>', unsafe_allow_html=True)
+
+# --- SIDEBAR (NASTAVENIA) ---
+st.sidebar.header("⚙️ Nastavenia a Konfigurácia")
+
+entsoe_key_input = st.sidebar.text_input(
+    "ENTSO-E API Kľúč", 
+    type="password", 
+    placeholder="Ponechajte prázdne pre Demo režim",
+    help="Ak máte vlastný bezplatný API token z ENTSO-E portálu, vložte ho sem. Inak aplikácia simuluje trhové ceny."
+)
+api_key = entsoe_key_input if entsoe_key_input else "DEMO_MODE"
+
+st.sidebar.subheader("💶 Porovnávacie parametre")
+cena_fix_input = st.sidebar.slider(
+    "Vaša súčasná fixovaná cena komodity (v centoch/kWh s DPH)",
+    min_value=10.0, max_value=25.0, value=16.5, step=0.5
+)
+cena_fix_eur = cena_fix_input / 100.0
+
+marza_dodavatela = st.sidebar.slider(
+    "Odhadovaná marža spotového dodávateľa (EUR/MWh)",
+    min_value=5, max_value=25, value=15, step=1
+) / 1000.0
+
+# --- HLAVNÝ OBSAH ---
+tabs = st.tabs(["📊 Analýza a Porovnanie", "💡 Ako získať dáta z SSD?", "💰 Možnosti Úspory"])
+
+with tabs[0]:
+    col_left, col_right = st.columns([1, 2])
+    
+    with col_left:
+        st.write("### 📂 Krok 1: Nahrajte dáta")
+        uploaded_file = st.file_uploader(
+            "Nahrajte export (CSV alebo XLSX) z portálu Stredoslovenskej distribučnej (SSD)", 
+            type=["csv", "xlsx"]
+        )
+        use_demo = st.checkbox("Nemám pri sebe súbor, použiť **Demo ukážku** (1. - 15. Máj)")
+        
+    df_spotreba = None
+    if uploaded_file is not None:
+        df_spotreba = parsuj_ssd_subor(uploaded_file)
+    elif use_demo:
+        df_spotreba = vygeneruj_vzorove_data()
+        
+    if df_spotreba is not None:
+        min_date = df_spotreba.index.min()
+        max_date = df_spotreba.index.max()
+        
+        with st.spinner("⏳ Sťahujem a párujem spotové ceny z burzy..."):
+            df_ceny = stiahni_spotove_ceny(min_date, max_date, api_key)
+            
+        if df_ceny is not None:
+            df_final = df_spotreba.join(df_ceny, how='inner')
+            
+            if not df_final.empty:
+                df_final['Cena_Spot_Koncova'] = df_final['cena_eur_kwh'] + marza_dodavatela
+                df_final['Naklady_Spot_EUR'] = df_final['Spotreba_kWh'] * df_final['Cena_Spot_Koncova']
+                df_final['Naklady_Fix_EUR'] = df_final['Spotreba_kWh'] * cena_fix_eur
+                
+                celkova_spotreba = df_final['Spotreba_kWh'].sum()
+                naklady_spot_total = df_final['Naklady_Spot_EUR'].sum()
+                naklady_fix_total = df_final['Naklady_Fix_EUR'].sum()
+                
+                uspora = naklady_fix_total - naklady_spot_total
+                priemerna_cena_spot = naklady_spot_total / celkova_spotreba if celkova_spotreba > 0 else 0
+                
+                st.write("### 📈 Krok 2: Finálny verdikt")
+                if uspora > 0:
+                    st.success(f"🎉 Na spote by ste za toto obdobie **UŠETRILI {uspora:.2f} EUR** oproti vášmu fixu!")
+                else:
+                    st.warning(f"⚠️ Pri vašom aktuálnom profile by ste na spote **PREPLATILI {abs(uspora):.2f} EUR**. Oplatí sa zostať pri fixe.")
+                    
+                m_col1, m_col2, m_col3 = st.columns(3)
+                with m_col1:
+                    st.markdown(f'<div class="metric-card"><div class="metric-label">Celková Spotreba</div><div class="metric-value">{celkova_spotreba:.1f} kWh</div></div>', unsafe_allow_html=True)
+                with m_col2:
+                    st.markdown(f'<div class="metric-card"><div class="metric-label">Priemerná cena na Spote</div><div class="metric-value">{priemerna_cena_spot*100:.2f} ct/kWh</div></div>', unsafe_allow_html=True)
+                with m_col3:
+                    st.markdown(f'<div class="metric-card" style="border-left-color: #10B981;"><div class="metric-label">Vaša fixná cena</div><div class="metric-value">{cena_fix_input:.2f} ct/kWh</div></div>', unsafe_allow_html=True)
+                
+                st.write("### 📊 Priebeh spotreby a trhových cien")
+                df_graf = df_final.copy()
+                if len(df_graf) > 500:
+                    df_graf_resampled = pd.DataFrame({
+                        'Denná Spotreba (kWh)': df_graf['Spotreba_kWh'].resample('D').sum(),
+                        'Priemerná Denná Cena (EUR/MWh)': (df_graf['cena_eur_kwh'] * 1000).resample('D').mean()
+                    })
+                    st.line_chart(df_graf_resampled, height=350)
+                else:
+                    df_graf_visual = pd.DataFrame({
+                        'Spotreba (kWh)': df_graf['Spotreba_kWh'],
+                        'Spotová cena (ct/kWh)': df_graf['Cena_Spot_Koncova'] * 100
+                    })
+                    st.line_chart(df_graf_visual, height=350)
+                
+                st.write("### 📥 Stiahnuť detailný report")
+                csv_buffer = io.StringIO()
+                df_final[['Spotreba_kWh', 'Cena_Spot_Koncova', 'Naklady_Spot_EUR', 'Naklady_Fix_EUR']].to_csv(csv_buffer)
+                st.download_button(
+                    label="Stiahnuť prepočítané dáta (CSV)",
+                    data=csv_buffer.getvalue(),
+                    file_name="spotcheck_vysledky.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.error("Chyba: Nepodarilo sa spárovať dáta o spotrebe.")
+
+with tabs[1]:
+    st.write("""
+    ### 📑 Ako stiahnuť 15-minútové dáta zo Stredoslovenskej distribučnej?
+    1. Prihláste sa do svojho zákazníckeho konta na portáli **Distančné odpočty SSD**.
+    2. Prejdite do sekcie **Prehľad meraní / História spotreby**.
+    3. Vyberte požadované obdobie (odporúča sa aspoň 1 celý mesiac).
+    4. Zvoľte formát exportu **CSV** alebo **Excel (XLSX)** a uložte súbor.
+    5. Nahrajte súbor na prvej karte tejto aplikácie.
+    """)
+
+with tabs[2]:
+    st.write("""
+    ### 💰 Ako vyťažiť zo spotového trhu maximum?
+    * **Presun spotreby mimo špičky:** Najdrahšia elektrina býva ráno (8:00 - 10:00) a večer (18:00 - 21:00). Odložte umývačku alebo pranie na noc alebo poobedie.
+    * **Využitie batérie a FVE:** Nabíjajte batérie zo siete v noci za nízke ceny a spotrebúvajte ich počas drahej špičky.
+    """)

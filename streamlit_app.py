@@ -94,10 +94,11 @@ def stiahni_spotove_ceny(den_od, den_do):
         st.error(f"Nepodarilo sa stiahnuť ceny z OKTE: {str(e)}")
         return None
 
+
 def parsuj_ssd_subor(uploaded_file):
     """Bezpečne načíta nahraný CSV/XLSX súbor z SSD a ponechá ho v 15-minútovom rozlíšení"""
-try:
-        # 1. NAČÍTANIE SÚBORU
+    try:
+        # 1. Prvé zbežné načítanie pre nájdenie štartu tabuľky
         if uploaded_file.name.endswith('.csv'):
             try:
                 raw_df = pd.read_csv(uploaded_file, sep=';', header=None, engine='python')
@@ -106,8 +107,7 @@ try:
         else:
             raw_df = pd.read_excel(uploaded_file, header=None)
             
-        # 2. INTELIGENTNÉ HĽADANIE HLAVIČKY
-        # Prejdeme riadky a zistíme, na ktorom riadku sa nachádza text "1.5.0"
+        # 2. Hľadanie riadku, kde začína reálna hlavička
         header_row_index = 0
         for idx, row in raw_df.iterrows():
             row_str = str(row.values).lower()
@@ -115,8 +115,8 @@ try:
                 header_row_index = idx
                 break
                 
-        # Teraz načítame tabuľku znova, ale presne od riadku, kde je hlavička
-        uploaded_file.seek(0) # Vrátime sa na začiatok súboru pre istotu
+        # 3. Načítanie naostro s preskočením úvodných textov
+        uploaded_file.seek(0)
         if uploaded_file.name.endswith('.csv'):
             try:
                 df = pd.read_csv(uploaded_file, sep=';', skiprows=header_row_index, engine='python')
@@ -124,7 +124,7 @@ try:
                 df = pd.read_csv(uploaded_file, sep=None, skiprows=header_row_index, engine='python')
         else:
             df = pd.read_excel(uploaded_file, skiprows=header_row_index)
-        
+
         cas_col = "Dátum a čas merania"
         spotreba_col = "1.5.0 - Činný odber (kW)"
         
@@ -139,8 +139,10 @@ try:
             st.error(f"❌ Súbor nemá očakávanú štruktúru SSD. Nenašli sa stĺpce pre čas alebo odber.")
             return None
             
-        df = df[[cas_col, spotreba_col]].dropna()
+        # Výber stĺpcov a prevod dátových typov s ošetrením chýb
+        df = df[[cas_col, spotreba_col]]
         df[cas_col] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M", errors='coerce')
+        df[spotreba_col] = pd.to_numeric(df[spotreba_col], errors='coerce')
         df = df.dropna()
         df.set_index(cas_col, inplace=True)
         
@@ -152,8 +154,7 @@ try:
         # Prepočet: Výkon v kW prepočítame na energiu v kWh za 15 minút (kW * 0.25)
         df['Spotreba_kWh'] = df[spotreba_col] * 0.25
         
-        # SSD označuje koniec intervalu (00:15), OKTE začiatok (00:00).
-        # Posunieme index o 15 minút dozadu pre dokonalé spárovanie s OKTE.
+        # Posun indexu o 15 minút dozadu pre dokonalé spárovanie s OKTE.
         df_15min = df[['Spotreba_kWh']].copy()
         df_15min.index = df_15min.index - pd.Timedelta(minutes=15)
         
@@ -162,6 +163,7 @@ try:
     except Exception as e:
         st.error(f"Chyba pri čítaní súboru: {str(e)}")
         return None
+
 
 def vygeneruj_vzorove_data():
     """Generuje ukážkové 15-minútové dáta pre demo režim"""
@@ -177,7 +179,6 @@ def vygeneruj_vzorove_data():
         else:
             zaklad = 0.1
         spotreba = zaklad + random.uniform(0.0, 0.3)
-        # Generujeme rovno hodnotu, akoby prešla prepočtom na kWh
         data.append({"Čas": dt, "Spotreba_kWh": round(spotreba * 0.25, 3)})
         
     df_demo = pd.DataFrame(data)
@@ -263,7 +264,6 @@ with tabs[0]:
                 st.write("### 📊 Priebeh spotreby a trhových cien")
                 df_graf = df_final.copy()
                 if len(df_graf) > 500:
-                    # Ak je dát príliš veľa (napr. celý rok), zosumarizujeme ich na dni, aby graf netrhal
                     df_graf_resampled = pd.DataFrame({
                         'Denná Spotreba (kWh)': df_graf['Spotreba_kWh'].resample('d').sum(),
                         'Priemerná Denná Cena (EUR/MWh)': (df_graf['cena_eur_kwh'] * 1000).resample('d').mean()

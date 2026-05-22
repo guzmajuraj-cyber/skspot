@@ -93,13 +93,12 @@ def stiahni_spotove_ceny(den_od, den_do):
         st.error(f"Nepodarilo sa stiahnuť ceny z OKTE: {str(e)}")
         return None
 
-
 def parsuj_ssd_subor(uploaded_file):
-    """Bezpečne a univerzálne načíta akýkoľvek súbor (CSV, XLSX, XLS) z SSD distribučnej"""
+    """Robustne načíta a spracuje SSD súbor bez zbytočných textových konverzií"""
     try:
         df = None
         
-        # Pokus č. 1: Skúsime to prečítať ako CSV (mnohé .xls exporty sú len textové CSV premenované na Excel)
+        # 1. Načítanie súboru (vyskúšame UTF-8 aj CP1250 kódovanie, separátor čiarku aj bodkočiarku)
         encodings = ['utf-8', 'cp1250', 'iso-8859-2']
         separators = [',', ';']
         
@@ -108,14 +107,14 @@ def parsuj_ssd_subor(uploaded_file):
                 try:
                     uploaded_file.seek(0)
                     df = pd.read_csv(uploaded_file, sep=sep, encoding=enc, engine='python')
-                    if not df.empty and len(df.columns) >= 2:
+                    if df is not None and not df.empty and len(df.columns) >= 2:
                         break
                 except:
                     continue
             if df is not None and len(df.columns) >= 2:
                 break
                 
-        # Pokus č. 2: Ak zlyhalo CSV čítanie, ide o reálny binárny Excel súbor (.xlsx alebo .xls)
+        # Ak by išlo o reálny excel (.xls/.xlsx)
         if df is None or len(df.columns) < 2:
             try:
                 uploaded_file.seek(0)
@@ -123,95 +122,60 @@ def parsuj_ssd_subor(uploaded_file):
             except:
                 try:
                     uploaded_file.seek(0)
-                    df = pd.read_excel(uploaded_file, skiprows=0, engine='xlrd') # pre staré typy XLS
+                    df = pd.read_excel(uploaded_file, skiprows=0, engine='xlrd')
                 except Exception as e:
-                    st.error(f"❌ Nepodarilo sa rozkódovať Excel formát súboru. Skúste na portáli distribučnej vybrať čistý export do CSV. Detail: {str(e)}")
+                    st.error(f"❌ Nepodarilo sa otvoriť súbor: {str(e)}")
                     return None
 
         if df is None or df.empty:
-            st.error("❌ Súbor sa podarilo otvoriť, ale je prázdny.")
+            st.error("❌ Súbor je prázdny.")
             return None
 
-        # Fix pre posunutú hlavičku (ak sú na začiatku súboru prázdne riadky alebo informácie o odbernom mieste)
-        if "Dátum a čas merania" not in df.columns:
-            for idx, row in df.iterrows():
-                row_str = str(row.values).lower()
-                if "dátum a čas" in row_str or "datum a cas" in row_str or "1.5.0" in row_str:
-                    uploaded_file.seek(0)
-                    # Opakovaný pokus s preskočením balastu na začiatku
-                    try:
-                        df = pd.read_csv(uploaded_file, sep=',', skiprows=idx+1, engine='python')
-                    except:
-                        try:
-                            uploaded_file.seek(0)
-                            df = pd.read_csv(uploaded_file, sep=';', skiprows=idx+1, engine='python')
-                        except:
-                            uploaded_file.seek(0)
-                            df = pd.read_excel(uploaded_file, skiprows=idx+1)
-                    break
-
-        # Dynamická identifikácia stĺpcov podľa kľúčových slov
+        # 2. Identifikácia stĺpcov
         cas_col = None
         spotreba_col = None
-        dodavka_col = None   # Podpora pre FVE (Prebytky do siete)
+        dodavka_col = None
         
         for col in df.columns:
             col_clean = str(col).lower().replace('\xa0', ' ').strip()
+            
             if 'dátum a čas' in col_clean or 'datum a cas' in col_clean:
                 cas_col = col
-            if '1.5.0' in col_clean and 'odber' in col_clean:
+            if '1.5.0' in col_clean and 'odber' in col_clean and 'kvalita' not in col_clean:
                 spotreba_col = col
-            if '2.5.0' in col_clean and 'dodávka' in col_clean or 'dodavka' in col_clean:
+            if '2.5.0' in col_clean and ('dodávka' in col_clean or 'dodavka' in col_clean) and 'kvalita' not in col_clean:
                 dodavka_col = col
 
         if not cas_col or not spotreba_col:
-            st.error(f"❌ V súbore sa nenašli stĺpce pre 'Dátum a čas merania' alebo '1.5.0 - Činný odber'. Dostupné stĺpce v súbore sú: {list(df.columns)}")
+            st.error(f"❌ Nenašli sa stĺpce pre čas alebo odber. Dostupné stĺpce: {list(df.columns)}")
             return None
             
-        # Ponecháme iba tie stĺpce, ktoré naozaj ideme spracovať
+        # 3. Výber dát a konverzia indexu na čas
         potrebne_stlpce = [cas_col, spotreba_col]
         if dodavka_col:
             potrebne_stlpce.append(dodavka_col)
             
         df = df[potrebne_stlpce].copy()
         
-        # Flexibilná konverzia dátumov a časov
         df[cas_col] = pd.to_datetime(df[cas_col], errors='coerce')
-        
-        # Čistenie a číselná konverzia odberu (Spotreby)
-        if df[spotreba_col].dtype == 'object':
-            df[spotreba_col] = df[spotreba_col].astype(str).str.replace(',', '.').str.strip()
-        df[spotreba_col] = pd.to_numeric(df[spotreba_col], errors='coerce').fillna(0.0)
-        
-        # Čistenie a číselná konverzia dodávky (Výroby z FVE), ak existuje
-        if dodavka_col:
-            if df[dodavka_col].dtype == 'object':
-                df[dodavka_col] = df[dodavka_col].astype(str).str.replace(',', '.').str.strip()
-            df[dodavka_col] = pd.to_numeric(df[dodavka_col], errors='coerce').fillna(0.0)
-        else:
-            df['Dodavka_FVE_kW'] = 0.0
-            dodavka_col = 'Dodavka_FVE_kW'
-            
-        # Odstránenie riadkov s poškodeným dátumom
         df = df.dropna(subset=[cas_col])
-        
-        if df.empty:
-            st.error("❌ Po očistení dát nezostali žiadne platné riadky. Skontrolujte formáty v súbore.")
-            return None
-
         df.set_index(cas_col, inplace=True)
         
-        # Nastavenie časového pásma pre Slovensko
+        # Nastavenie časového pásma
         if df.index.tz is None:
             df.index = df.index.tz_localize('Europe/Bratislava', ambiguous='NaT', nonexistent='NaT')
         else:
             df.index = df.index.tz_convert('Europe/Bratislava')
             
-        # Výpočet energie v kWh za 15-minútovú periódu (kW * 0.25 hodiny)
+        # 4. PRIAMY VÝPOČET KWH (ŽIADNA KONVERZIA - stĺpce sú už čisté čísla float64)
         df['Spotreba_kWh'] = df[spotreba_col] * 0.25
-        df['Dodavka_kWh'] = df[dodavka_col] * 0.25
         
-        # Posun indexu spätne o 15 minút kvôli párovaniu s OKTE (OKTE indexuje začiatok hodiny, SSD koniec periódy)
+        if dodavka_col:
+            df['Dodavka_kWh'] = df[dodavka_col] * 0.25
+        else:
+            df['Dodavka_kWh'] = 0.0
+            
+        # Posun indexu pre OKTE spárovanie
         df_15min = df[['Spotreba_kWh', 'Dodavka_kWh']].copy()
         df_15min.index = df_15min.index - pd.Timedelta(minutes=15)
         
@@ -220,7 +184,6 @@ def parsuj_ssd_subor(uploaded_file):
     except Exception as e:
         st.error(f"Kritická chyba pri spracovaní súboru: {str(e)}")
         return None
-
 
 def vygeneruj_vzorove_data():
     """Generuje ukážkové dáta pre demo režim (predstiera dom bez FVE)"""

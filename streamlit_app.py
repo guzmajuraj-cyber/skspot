@@ -142,19 +142,19 @@ def parsuj_ssd_subor(uploaded_file):
         # Výber stĺpcov
         df = df[[cas_col, spotreba_col]].copy()
         
-        # Očistenie hodnôt od neviditeľných medzier a prevod na text pre stabilný parsing
-        df[cas_col] = df[cas_col].astype(str).str.strip()
-        
-        # Sériové testovanie konverzie na dátum
+        # Sériové testovanie konverzie na dátum (od najuniverzálnejšieho po špecifické)
+        # 1. Čistá automatika - ideálna pre ISO formát (YYYY-MM-DD) aj natívny Excel dátum
         df['Cas_Parsed'] = pd.to_datetime(df[cas_col], errors='coerce')
         
+        # 2. Ak automatika zlyhala, skúsime formát s bodkami v dátume a dvojbodkou v čase
         if df['Cas_Parsed'].isna().sum() == len(df):
-            df['Cas_Parsed'] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M", errors='coerce')
+            df['Cas_Parsed'] = pd.to_datetime(df[cas_col].astype(str).str.strip(), format="%d.%m.%Y %H:%M", errors='coerce')
             
+        # 3. Ak stále zlyháva, skúsime slovenský formát vrátane sekúnd
         if df['Cas_Parsed'].isna().sum() == len(df):
-            df['Cas_Parsed'] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M:%S", errors='coerce')
+            df['Cas_Parsed'] = pd.to_datetime(df[cas_col].astype(str).str.strip(), format="%d.%m.%Y %H:%M:%S", errors='coerce')
             
-        # Diagnostický výpis, ak zlyhajú všetky pokusy
+        # Diagnostický výpis pre prípad núdze
         if df['Cas_Parsed'].isna().sum() == len(df):
             st.error(f"❌ Nepodarilo sa naparsovať dátum. Prvé hodnoty v stĺpci '{cas_col}' sú:")
             st.code(df[cas_col].head(5).to_list())

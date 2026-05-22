@@ -27,7 +27,7 @@ st.markdown("""
 
 @st.cache_data(ttl=3600)
 def stiahni_spotove_ceny(den_od, den_do):
-    """Stiahne reálne 15-minútové spotové ceny priamo z API OKTE (96 periód za deň)"""
+    """Stiahne dáta z API OKTE a vráti surovú tabuľku AJ tabuľku pripravenú na párovanie"""
     str_od = den_od.strftime("%Y-%m-%d")
     str_do = den_do.strftime("%Y-%m-%d")
     
@@ -37,39 +37,41 @@ def stiahni_spotove_ceny(den_od, den_do):
         response = requests.get(url, timeout=15)
         if response.status_code != 200:
             st.error(f"❌ Chyba OKTE API (Kód {response.status_code})")
-            return None
+            return None, None
             
-        data = response.json()
-        ceny = []
+        surove_data = response.json()
+        if not surove_data:
+            st.warning("⚠️ OKTE API nevrátilo pre toto obdobie žiadne dáta.")
+            return None, None
+            
+        # 1. VYTVORENIE SUROVEJ TABUĽKY (PRESNE AKO PRIŠLA Z API)
+        df_surove = pd.DataFrame(surove_data) # Obsahuje stĺpce: deliveryDay, period, price
         
-        for zápis in data:
+        # 2. PRÍPRAVA PARSOVANEJ TABUĽKY PRE GRAFY A PREPOČTY
+        ceny_parsovane = []
+        for zápis in surove_data:
             den_str = zápis['deliveryDay']
-            perioda = int(zápis['period'])   # Perióda 1 až 96
-            cena_mwh = float(zápis['price'])  # Cena v EUR / MWh
-            cena_kwh = cena_mwh / 1000.0      # Prepočet na EUR / kWh
+            perioda = int(zápis['period'])
+            cena_mwh = float(zápis['price'])
+            cena_kwh = cena_mwh / 1000.0
             
             zaklad_dna = datetime.fromisoformat(den_str)
             realny_cas = zaklad_dna + timedelta(minutes=(perioda - 1) * 15)
+            ceny_parsovane.append({"cas": realny_cas, "cena_eur_kwh": cena_kwh})
             
-            ceny.append({"cas": realny_cas, "cena_eur_kwh": cena_kwh})
-            
-        if not ceny:
-            st.warning("⚠️ OKTE API nevrátilo pre toto obdobie žiadne dáta.")
-            return None
-            
-        df_ceny = pd.DataFrame(ceny)
-        df_ceny.set_index("cas", inplace=True)
+        df_parsovane = pd.DataFrame(ceny_parsovane)
+        df_parsovane.set_index("cas", inplace=True)
         
-        if df_ceny.index.tz is None:
-            df_ceny.index = df_ceny.index.tz_localize('Europe/Bratislava', ambiguous='NaT', nonexistent='NaT')
+        if df_parsovane.index.tz is None:
+            df_parsovane.index = df_parsovane.index.tz_localize('Europe/Bratislava', ambiguous='NaT', nonexistent='NaT')
         else:
-            df_ceny.index = df_ceny.index.tz_convert('Europe/Bratislava')
+            df_parsovane.index = df_parsovane.index.tz_convert('Europe/Bratislava')
             
-        return df_ceny
+        return df_surove, df_parsovane
         
     except Exception as e:
         st.error(f"Nepodarilo sa stiahnuť ceny z OKTE: {str(e)}")
-        return None
+        return None, None
 
 
 def parsuj_ssd_subor(uploaded_file):
@@ -144,7 +146,6 @@ def parsuj_ssd_subor(uploaded_file):
         else:
             df['Dodavka_kWh'] = 0.0
             
-        # Posun indexu pre OKTE spárovanie (zarovnanie na začiatok intervalu)
         df_15min = df[['Spotreba_kWh', 'Dodavka_kWh']].copy()
         df_15min.index = df_15min.index - pd.Timedelta(minutes=15)
         
@@ -181,7 +182,8 @@ marza_dodavatela = st.sidebar.slider("Marža spotového dodávateľa (EUR/MWh)",
 
 tabs = st.tabs(["📊 Analýza a Porovnanie", "👀 Kontrola načítaných dát", "💡 Ako získať dáta?"])
 
-df_ceny_debug = None  # Globálna premenná pre zobrazenie v druhej záložke
+# Globálne premenné na prenos dát do záložky 1
+df_surove_okte = None 
 
 with tabs[0]:
     col_left, col_right = st.columns([1, 2])
@@ -201,12 +203,10 @@ with tabs[0]:
         max_date = df_spotreba.index.max()
         
         with st.spinner("⏳ Sťahujem spotové ceny z OKTE..."):
-            df_ceny = stiahni_spotove_ceny(min_date, max_date)
-            df_ceny_debug = df_ceny  # Uložíme pre debug záložku
+            df_surove_okte, df_ceny_parsovane = stiahni_spotove_ceny(min_date, max_date)
             
-        if df_ceny is not None:
-            # ZMENA: Používame 'left' join a dopĺňame chýbajúce ceny predchádzajúcou známou hodnotou (ffill)
-            df_final = df_spotreba.join(df_ceny, how='left')
+        if df_ceny_parsovane is not None:
+            df_final = df_spotreba.join(df_ceny_parsovane, how='left')
             df_final['cena_eur_kwh'] = df_final['cena_eur_kwh'].ffill().bfill().fillna(0.0)
             
             df_final['Cena_Spot_Koncova'] = df_final['cena_eur_kwh'] + marza_dodavatela
@@ -231,51 +231,39 @@ with tabs[0]:
             with m_col2: st.markdown(f'<div class="metric-card"><div class="metric-label">Priemerná cena Spot</div><div class="metric-value">{priemerna_cena_spot*100:.2f} ct/kWh</div></div>', unsafe_allow_html=True)
             with m_col3: st.markdown(f'<div class="metric-card"><div class="metric-label">Celková Dodávka</div><div class="metric-value">{celkova_dodavka:.1f} kWh</div></div>', unsafe_allow_html=True)
             
-            # --- VYKRESLENIE GRAFOV ---
             st.write("### 📊 Priebeh spotreby a trhových cien")
             df_graf = df_final.copy()
             
-            # 1. Graf spotreby
             st.write("#### 🔌 Vaša spotreba a dodávka do siete (kWh)")
             graf_dict = {'Odber (kWh)': df_graf['Spotreba_kWh']}
             if celkova_dodavka > 0:
                 graf_dict['Dodávka (kWh)'] = df_graf['Dodavka_kWh']
             st.line_chart(pd.DataFrame(graf_dict), height=250)
             
-            # 2. NOVÝ NOVÝ GRAF PRE CENY Z OKTE
             st.write("#### 💶 Vývoj ceny na spotovom trhu OKTE (centy/kWh s DPH)")
             df_graf['Spotová cena (ct/kWh)'] = df_graf['Cena_Spot_Koncova'] * 100
             st.line_chart(df_graf[['Spotová cena (ct/kWh)']], height=200, color="#FF9F43")
+
 with tabs[1]:
     st.write("### 👀 Kontrola spracovaných dát")
     if df_spotreba is not None:
-        st.info(f"📊 **Štatistika súboru:** V tabuľke sa nachádza celkovo **{len(df_spotreba)} riadkov** s 15-minútovými záznamami.")
-        
-        # Príprava tabuľky vašej spotreby na zobrazenie
+        # Výpis tvojej distribučnej tabuľky
         df_view = df_spotreba.copy()
         df_view.index = df_view.index.strftime('%Y-%m-%d %H:%M:%S')
         df_view.index.name = 'Dátum a Čas (upravený pre OKTE)'
         df_view.columns = ['Odber (kWh / 15min)', 'Dodávka FVE (kWh / 15min)']
         
-        # ZOBRAZENIE VŠETKÝCH RIADKOV SPOTREBY
         st.write("#### 📋 Kompletné namerané dáta z vášho súboru (Odber a Dodávka):")
-        # height=None prinúti tabuľku roztiahnuť sa na všetky riadky bez vnútorného scrollbaru, ak ich je okolo 96
         st.dataframe(df_view, use_container_width=True)
         
-        # ZOBRAZENIE VŠETKÝCH RIADKOV STIAHNUTÝCH CIEN Z OKTE
-        st.write("#### 🔍 Kontrola API OKTE (Kompletné stiahnuté trhové ceny):")
-        if df_ceny_debug is not None:
-            df_ceny_view = df_ceny_debug.copy()
-            df_ceny_view.index = df_ceny_view.index.strftime('%Y-%m-%d %H:%M:%S')
-            df_ceny_view.index.name = 'Čas platnosti ceny'
-            df_ceny_view['Cena v centoch/kWh (bez marže)'] = df_ceny_view['cena_eur_kwh'] * 100
-            
-            # Zobrazíme kompletnú tabuľku cien zo serveru OKTE
-            st.dataframe(df_ceny_view[['Cena v centoch/kWh (bez marže)']], use_container_width=True)
+        # NOVÝ SUROVÝ VÝPIS Z OKTE (BEZ ÚPRAV)
+        st.write("#### 🔍 Surové dáta z API OKTE (Presne ako prišli zo serveru):")
+        if df_surove_okte is not None:
+            # Zobrazí presne stĺpce deliveryDay, period, price bez modifikácie indexu či hodnôt
+            st.dataframe(df_surove_okte, use_container_width=True)
         else:
-            st.error("❌ Žiadne ceny z OKTE neboli stiahnuté. Skontrolujte internetové pripojenie aplikácie alebo rozsah dátumov.")
+            st.error("❌ Žiadne surové dáta z OKTE neboli stiahnuté.")
             
-        # Rýchly prehľad (Suma, priemer, min, max) zostáva pre kontrolu na spodku karty
         st.write("#### 📈 Rýchly prehľad hodnôt (Súhrnné sumy a priemery)")
         st.dataframe(df_spotreba.describe().T[['mean', 'min', 'max', 'sum']].rename(
             index={'Spotreba_kWh': 'Odber (Suma spotreby v kWh)', 'Dodavka_kWh': 'Dodávka (Suma prebytkov FVE v kWh)'},
@@ -283,3 +271,6 @@ with tabs[1]:
         ), use_container_width=True)
     else:
         st.warning("📂 Najprv nahrajte súbor.")
+
+with tabs[2]:
+    st.write("Postup stiahnutia dát z portálu SSD...")

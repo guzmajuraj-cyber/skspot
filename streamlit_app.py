@@ -141,7 +141,13 @@ def parsuj_ssd_subor(uploaded_file):
             
         # Výber stĺpcov a prevod dátových typov s ošetrením chýb
         df = df[[cas_col, spotreba_col]]
-        df[cas_col] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M", errors='coerce')
+       # Inteligentný prevod času, ktorý zvládne CSV text aj natívny Excel formát
+        df[cas_col] = pd.to_datetime(df[cas_col], errors='coerce')
+        
+        # Ak by náhodou po automatickom prevode zostali len NaT (napr. kvôli špecifickému slovenskému textu), 
+        # skúsime náš overený formát s dňom na začiatku
+        if df[cas_col].isna().sum() == len(df):
+            df[cas_col] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M", errors='coerce')
         df[spotreba_col] = pd.to_numeric(df[spotreba_col], errors='coerce')
         df = df.dropna()
         df.set_index(cas_col, inplace=True)

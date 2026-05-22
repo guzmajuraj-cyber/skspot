@@ -96,14 +96,34 @@ def stiahni_spotove_ceny(den_od, den_do):
 
 def parsuj_ssd_subor(uploaded_file):
     """Bezpečne načíta nahraný CSV/XLSX súbor z SSD a ponechá ho v 15-minútovom rozlíšení"""
-    try:
+try:
+        # 1. NAČÍTANIE SÚBORU
         if uploaded_file.name.endswith('.csv'):
             try:
-                df = pd.read_csv(uploaded_file, sep=';', engine='python')
+                raw_df = pd.read_csv(uploaded_file, sep=';', header=None, engine='python')
             except:
-                df = pd.read_csv(uploaded_file, sep=None, engine='python')
+                raw_df = pd.read_csv(uploaded_file, sep=None, header=None, engine='python')
         else:
-            df = pd.read_excel(uploaded_file)
+            raw_df = pd.read_excel(uploaded_file, header=None)
+            
+        # 2. INTELIGENTNÉ HĽADANIE HLAVIČKY
+        # Prejdeme riadky a zistíme, na ktorom riadku sa nachádza text "1.5.0"
+        header_row_index = 0
+        for idx, row in raw_df.iterrows():
+            row_str = str(row.values).lower()
+            if '1.5.0' in row_str or 'činný odber' in row_str or 'cinny odber' in row_str:
+                header_row_index = idx
+                break
+                
+        # Teraz načítame tabuľku znova, ale presne od riadku, kde je hlavička
+        uploaded_file.seek(0) # Vrátime sa na začiatok súboru pre istotu
+        if uploaded_file.name.endswith('.csv'):
+            try:
+                df = pd.read_csv(uploaded_file, sep=';', skiprows=header_row_index, engine='python')
+            except:
+                df = pd.read_csv(uploaded_file, sep=None, skiprows=header_row_index, engine='python')
+        else:
+            df = pd.read_excel(uploaded_file, skiprows=header_row_index)
         
         cas_col = "Dátum a čas merania"
         spotreba_col = "1.5.0 - Činný odber (kW)"

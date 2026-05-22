@@ -157,8 +157,12 @@ def parsuj_ssd_subor(uploaded_file):
         else:
             df.index = df.index.tz_convert('Europe/Bratislava')
             
-        # Agregácia 15-minútových periód na 1 hodinu (Korelácia s označením burzy)
-        df_hodina = df[spotreba_col].resample('h', closed='right', label='right').sum().to_frame(name='Spotreba_kWh')
+# --- TU JE TA SPRÁVNA MATEMATIKA ---
+        # Prepočet: Výkon v kW prepočítame na energiu v kWh za 15 minút (kW * 0.25)
+        df['Spotreba_Real_kWh'] = df[spotreba_col] * 0.25
+            
+        # Agregácia: Sčítame už reálne kWh do hodinových blokov
+        df_hodina = df['Spotreba_Real_kWh'].resample('h', closed='right', label='right').sum().to_frame(name='Spotreba_kWh')
         df_hodina.index = df_hodina.index - pd.Timedelta(hours=1)
         
         return df_hodina

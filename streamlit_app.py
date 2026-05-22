@@ -142,12 +142,17 @@ def parsuj_ssd_subor(uploaded_file):
         # Výber stĺpcov
         df = df[[cas_col, spotreba_col]]
         
-        # Flexibilný prevod času (zvládne text z CSV aj natívny dátum z Excelu)
-        df[cas_col] = pd.to_datetime(df[cas_col], errors='coerce')
+        # Sériové testovanie formátov od tvojho presného formátu s dvojbodkou
+        # 1. Presný formát: DD.MM.RRRR HH:MM
+        df[cas_col] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M", errors='coerce')
         
-        # Poistka pre prípad, že by automatický prevod Excelu nevyšiel kvôli formátu textu
+        # 2. Ak by tam Excel potajomky pribalil sekundy: DD.MM.RRRR HH:MM:SS
         if df[cas_col].isna().sum() == len(df):
-            df[cas_col] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M", errors='coerce')
+            df[cas_col] = pd.to_datetime(df[cas_col], format="%d.%m.%Y %H:%M:%S", errors='coerce')
+            
+        # 3. Ak zlyhalo, skúsime automatiku pre natívny Excel dátumový typ
+        if df[cas_col].isna().sum() == len(df):
+            df[cas_col] = pd.to_datetime(df[cas_col], errors='coerce')
             
         # Prevod spotreby na čísla (všetky textové chyby a pomlčky sa premenia na NaN)
         df[spotreba_col] = pd.to_numeric(df[spotreba_col], errors='coerce')
@@ -197,7 +202,7 @@ def vygeneruj_vzorove_data():
 # --- HLAVNÉ ROZHRANIE APLIKÁCIE ---
 
 st.markdown('<div class="main-title">⚡ SpotCheck Slovensko</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Zistite okamžite a nezáväzne, či by sa vám oplatil prechod na spotové ceny elektriny na základe vašich reálnych dát z inteligentného elektromeru.</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Zistite okamžite a nezáväzne, či by sa vám oplatil prechod na spotové ceny elektriny na záklasde vašich reálnych dát z inteligentného elektromeru.</div>', unsafe_allow_html=True)
 
 # --- SIDEBAR (NASTAVENIA) ---
 st.sidebar.header("⚙️ Nastavenia a Konfigurácia")

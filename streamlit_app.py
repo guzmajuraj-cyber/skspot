@@ -168,7 +168,6 @@ def vygeneruj_vzorove_data():
         hodina = dt.hour
         zaklad = 0.4 if (7 <= hodina <= 9 or 17 <= hodina <= 22) else 0.1
         spotreba = zaklad + random.uniform(0.0, 0.3)
-        # Pridaná simulácia prebytkov fotovoltiky počas dňa
         dodavka = random.uniform(0.5, 1.5) if (10 <= hodina <= 16) else 0.0
         data.append({"Čas": dt, "Spotreba_kWh": round(spotreba * 0.25, 3), "Dodavka_kWh": round(dodavka * 0.25, 3)})
     df_demo = pd.DataFrame(data)
@@ -218,8 +217,6 @@ with tabs[0]:
             df_final['Cena_Spot_Koncova'] = df_final['cena_eur_kwh'] + marza_dodavatela
             df_final['Naklady_Spot_EUR'] = df_final['Spotreba_kWh'] * df_final['Cena_Spot_Koncova']
             df_final['Naklady_Fix_EUR'] = df_final['Spotreba_kWh'] * cena_fix_eur
-            
-            # NOVINKA: Vynásobenie dodávky čistou spotovou cenou z trhu
             df_final['Vynosy_Spot_EUR'] = df_final['Dodavka_kWh'] * df_final['cena_eur_kwh']
             
             celkova_spotreba = df_final['Spotreba_kWh'].sum()
@@ -243,9 +240,7 @@ with tabs[0]:
             with m_col2: st.markdown(f'<div class="metric-card"><div class="metric-label">Priemerná cena Spot</div><div class="metric-value">{priemerna_cena_spot*100:.2f} ct/kWh</div></div>', unsafe_allow_html=True)
             with m_col3: st.markdown(f'<div class="metric-card"><div class="metric-label">Celková Dodávka</div><div class="metric-value">{celkova_dodavka:.1f} kWh</div></div>', unsafe_allow_html=True)
             
-            # NOVÁ TRETIA TABUĽKA NA HLAVNOM ROZHRANÍ
             st.write("### 💶 Krok 3: Finančná bilancia (Multiplikácia trhovou cenou)")
-            
             bilancia_netto = vynosy_spot_total - naklady_spot_total
             
             t3_data = {
@@ -270,11 +265,19 @@ with tabs[0]:
             st.write("### 📊 Priebeh spotreby a trhových cien")
             df_graf = df_final.copy()
             
-            st.write("#### 🔌 Vaša spotreba a dodávka do siete (kWh)")
+            st.write("#### 🔌 Vaša spotreba a dodávka do siet'e (kWh)")
             graf_dict = {'Odber (kWh)': df_graf['Spotreba_kWh']}
             if celkova_dodavka > 0:
                 graf_dict['Dodávka (kWh)'] = df_graf['Dodavka_kWh']
             st.line_chart(pd.DataFrame(graf_dict), height=250)
+            
+            # --- NOVÝ GRAF: FINANČNÝ PRIEBEH MULTIPLIKÁCIE ---
+            st.write("#### 💰 Finálny finančný priebeh (EUR za 15-min)")
+            # Odber dáme do záporu (mínusové eurá za náklad) a výnosy z OZE do kladu (plusové eurá)
+            fin_graf_dict = {'Náklady na odber (€)': df_graf['Naklady_Spot_EUR'] * -1}
+            if celkova_dodavka > 0:
+                fin_graf_dict['Výnosy z dodávky (€)'] = df_graf['Vynosy_Spot_EUR']
+            st.line_chart(pd.DataFrame(fin_graf_dict), height=250, color=["#FF4B4B", "#29B560"])
             
             st.write("#### 💶 Vývoj ceny na spotovom trhu OKTE (centy/kWh s DPH)")
             df_graf['Spotová cena (ct/kWh)'] = df_graf['Cena_Spot_Koncova'] * 100
@@ -283,7 +286,6 @@ with tabs[0]:
 with tabs[1]:
     st.write("### 👀 Kontrola spracovaných dát")
     if df_spotreba is not None:
-        # Výpis distribučnej tabuľky
         df_view = df_spotreba.copy()
         df_view.index = df_view.index.strftime('%Y-%m-%d %H:%M:%S')
         df_view.index.name = 'Dátum a Čas (upravený pre OKTE)'
@@ -292,13 +294,11 @@ with tabs[1]:
         st.write("#### 📋 Kompletné namerané dáta z vášho súboru (Odber a Dodávka):")
         st.dataframe(df_view, use_container_width=True)
         
-        # VYČISTENÝ SUROVÝ VÝPIS Z OKTE (Iba tvoje 4 stĺpce)
         st.write("#### 🔍 Surové dáta z API OKTE (Iba vybrané stĺpce):")
         if df_surove_okte is not None:
             st.dataframe(df_surove_okte, use_container_width=True, hide_index=True)
         else:
             st.error("❌ Žiadne surové dáta z OKTE neboli stiahnuté.")
-            
     else:
         st.warning("📂 Najprv nahrajte súbor.")
 

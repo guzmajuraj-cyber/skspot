@@ -32,7 +32,6 @@ st.markdown("""
 
 @st.cache_data(ttl=3600)
 def stiahni_spotove_ceny(den_od, den_do):
-    """Stiahne dáta z API OKTE, vyfiltruje surovú tabuľku a pripraví parsovanú na párovanie"""
     str_od = den_od.strftime("%Y-%m-%d")
     str_do = den_do.strftime("%Y-%m-%d")
     
@@ -49,25 +48,20 @@ def stiahni_spotove_ceny(den_od, den_do):
             st.warning("⚠️ OKTE API nevrátilo pre toto obdobie žiadne dáta.")
             return None, None
             
-        # 1. VYTVORENIE FILTROVANEJ SUROVEJ TABUĽKY (LEN TIE 4 ŽELANÉ STĹPCE)
         df_celkovy = pd.DataFrame(surove_data)
         pozadovane_stlpce = ['period', 'price', 'deliveryStart', 'deliveryEnd']
         existujuce_stlpce = [col for col in pozadovane_stlpce if col in df_celkovy.columns]
         df_surove = df_celkovy[existujuce_stlpce].copy()
         
-        # 2. PRÍPRAVA PARSOVANEJ TABUĽKY PRE GRAFY A PREPOČTY
         ceny_parsovane = []
         for zápis in surove_data:
             den_str = zápis['deliveryDay']
             perioda = int(zápis['period'])
-            # Prevod ceny na objekt Decimal pre zachovanie 100% presnosti
             cena_mwh = Decimal(str(zápis['price']))
             cena_kwh = cena_mwh / Decimal('1000.0')
             
             zaklad_dna = datetime.fromisoformat(den_str)
             realny_cas = zaklad_dna + timedelta(minutes=(perioda - 1) * 15)
-            # Do tabuľky ukladáme čistý float pre kompatibilitu s grafmi pandas,
-            # ale presný Decimal pre výpočty vyriešime priamo pri spracovaní.
             ceny_parsovane.append({"cas": realny_cas, "cena_eur_kwh": float(cena_kwh)})
             
         df_parsovane = pd.DataFrame(ceny_parsovane)
@@ -86,7 +80,6 @@ def stiahni_spotove_ceny(den_od, den_do):
 
 
 def parsuj_ssd_subor(uploaded_file):
-    """Robustne načíta a spracuje SSD súbor bez zbytočných textových konverzií"""
     try:
         df = None
         encodings = ['utf-8', 'cp1250', 'iso-8859-2']
@@ -151,7 +144,6 @@ def parsuj_ssd_subor(uploaded_file):
         else:
             df.index = df.index.tz_convert('Europe/Bratislava')
             
-        # Do df ukladáme čisté hodnoty, presný prepočet urobíme pomocou Decimal neskôr
         df['Spotreba_kWh'] = df[spotreba_col].astype(float) * 0.25
         if dodavka_col:
             df['Dodavka_kWh'] = df[dodavka_col].astype(float) * 0.25
@@ -189,15 +181,14 @@ st.markdown('<div class="sub-title">Porovnanie fixných a reálnych spotových c
 
 st.sidebar.header("⚙️ Nastavenia")
 cena_fix_input = st.sidebar.slider("Vaša fixná cena komodity (centy/kWh s DPH)", 10.0, 25.0, 16.5, 0.5)
-# Prevod vstupov na presný typ Decimal
 cena_fix_eur = Decimal(str(cena_fix_input)) / Decimal('100.0')
 
+# Poznámka: Marža zostáva v nastaveniach ak by bola potrebná inde, ale z finančnej bilancie čistého spotu je vyradená.
 marza_dodavatela_input = st.sidebar.slider("Marža spotového dodávateľa (EUR/MWh)", 5, 25, 15, 1)
 marza_dodavatela = Decimal(str(marza_dodavatela_input)) / Decimal('1000.0')
 
 tabs = st.tabs(["📊 Analýza a Porovnanie", "👀 Kontrola načítaných dát", "💡 Ako získať dáta?"])
 
-# Globálne premenné na prenos dát medzi tabmi
 df_surove_okte = None 
 
 with tabs[0]:
@@ -224,7 +215,6 @@ with tabs[0]:
             df_final = df_spotreba.join(df_ceny_parsovane, how='left')
             df_final['cena_eur_kwh'] = df_final['cena_eur_kwh'].ffill().bfill().fillna(0.0)
             
-            # --- 100% PRESNÝ VÝPOČET CEZ KNIŽNICU DECIMAL (Presnosť na 8+ miest) ---
             naklady_spot_list = []
             naklady_fix_list = []
             vynosy_spot_list = []
@@ -236,10 +226,8 @@ with tabs[0]:
                 dodavka_15m = Decimal(str(row['Dodavka_kWh']))
                 cena_trhova = Decimal(str(row['cena_eur_kwh']))
                 
-                cena_spot_koncova = cena_trhova + marza_dodavatela
-                
-                # Výpočet pre daný 15-minútový riadok
-                n_spot = spotreba_15m * cena_spot_koncova
+                # ZMENA: Odber násobíme ČISTOU trhovou cenou rovnako ako dodávku
+                n_spot = spotreba_15m * cena_trhova
                 n_fix = spotreba_15m * cena_fix_eur
                 v_spot = dodavka_15m * cena_trhova
                 
@@ -247,16 +235,13 @@ with tabs[0]:
                 naklady_fix_list.append(float(n_fix))
                 vynosy_spot_list.append(float(v_spot))
                 
-                # Kumulatívna suma priamo v presnom type Decimal
                 celkova_spotreba_dec += spotreba_15m
                 celkova_dodavka_dec += dodavka_15m
                 
-            # Uloženie presných riadkových výpočtov do dataframe na kreslenie grafov
             df_final['Naklady_Spot_EUR'] = naklady_spot_list
             df_final['Naklady_Fix_EUR'] = naklady_fix_list
             df_final['Vynosy_Spot_EUR'] = vynosy_spot_list
             
-            # Finálne sčítanie cez Decimal (žiadna floating-point odchýlka)
             naklady_spot_total = sum(Decimal(str(x)) for x in naklady_spot_list)
             naklady_fix_total = sum(Decimal(str(x)) for x in naklady_fix_list)
             vynosy_spot_total = sum(Decimal(str(x)) for x in vynosy_spot_list)
@@ -264,7 +249,6 @@ with tabs[0]:
             uspora = naklady_fix_total - naklady_spot_total
             priemerna_cena_spot = naklady_spot_total / celkova_spotreba_dec if celkova_spotreba_dec > 0 else Decimal('0.0')
             
-            # Zaokrúhlenie finálnych hodnôt na 8 desatinných miest pred zobrazením
             p_celkova_spotreba = celkova_spotreba_dec.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             p_celkova_dodavka = celkova_dodavka_dec.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             p_naklady_spot_total = naklady_spot_total.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
@@ -274,23 +258,23 @@ with tabs[0]:
             
             st.write("### 📈 Krok 2: Finálny verdikt")
             if uspora > 0:
-                st.success(f"🎉 Na spote by ste ušetrili **{p_uspora} EUR** (počítané s presnosťou na 8 desatinných miest).")
+                st.success(f"🎉 Na čistom spote by ste ušetrili **{p_uspora} EUR**.")
             else:
-                st.warning(f"⚠️ Na spote by ste preplatili **{abs(p_uspora)} EUR** (počítané s presnosťou na 8 desatinných miest).")
+                st.warning(f"⚠️ Na čistom spote by ste preplatili **{abs(p_uspora)} EUR**.")
                 
             m_col1, m_col2, m_col3 = st.columns(3)
             with m_col1: st.markdown(f'<div class="metric-card"><div class="metric-label">Celkový Odber</div><div class="metric-value">{p_celkova_spotreba} kWh</div></div>', unsafe_allow_html=True)
-            with m_col2: st.markdown(f'<div class="metric-card"><div class="metric-label">Priemerná cena Spot</div><div class="metric-value">{p_priemerna_cena_spot} ct/kWh</div></div>', unsafe_allow_html=True)
+            with m_col2: st.markdown(f'<div class="metric-card"><div class="metric-label">Priemerná čistá cena Spot</div><div class="metric-value">{p_priemerna_cena_spot} ct/kWh</div></div>', unsafe_allow_html=True)
             with m_col3: st.markdown(f'<div class="metric-card"><div class="metric-label">Celková Dodávka</div><div class="metric-value">{p_celkova_dodavka} kWh</div></div>', unsafe_allow_html=True)
             
-            st.write("### 💶 Krok 3: Finančná bilancia (Multiplikácia trhovou cenou na 8 miest)")
+            st.write("### 💶 Krok 3: Finančná bilancia (Multiplikácia čistou trhovou cenou na 8 miest)")
             bilancia_netto = vynosy_spot_total - naklady_spot_total
             p_bilancia_netto = bilancia_netto.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             p_cisty_rozdiel_kwh = (celkova_dodavka_dec - celkova_spotreba_dec).quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             
             t3_data = {
                 "Analytická položka": [
-                    "Celkový Odber (Vynásobený cenou zo spotu s maržou)", 
+                    "Celkový Odber (Vynásobený čistou cenou zo spotu)", 
                     "Celková Dodávka FVE (Vynásobená čistou cenou zo spotu)", 
                     "Čistá finančná bilancia (Výnosy - Náklady)"
                 ],
@@ -306,6 +290,19 @@ with tabs[0]:
                 ]
             }
             st.table(pd.DataFrame(t3_data))
+
+            st.write("### 🛠️ Porovnanie s Excelom (Audit)")
+            df_audit = df_final.copy()
+            df_audit.index = df_audit.index.strftime('%Y-%m-%d %H:%M:%S')
+            
+            csv_buffer = io.StringIO()
+            df_audit.to_csv(csv_buffer, sep=';')
+            st.download_button(
+                label="📥 Stiahnuť kompletný 15-minútový report pre Excel (.csv)",
+                data=csv_buffer.getvalue(),
+                file_name="spotcheck_pure_spot_data.csv",
+                mime="text/csv"
+            )
             
             st.write("### 📊 Priebeh spotreby a trhových cien")
             df_graf = df_final.copy()
@@ -323,8 +320,7 @@ with tabs[0]:
             st.line_chart(pd.DataFrame(fin_graf_dict), height=250, color=["#FF4B4B", "#29B560"])
             
             st.write("#### 💶 Vývoj ceny na spotovom trhu OKTE (centy/kWh s DPH)")
-            # Použijeme float len na vizualizačné účely grafu
-            df_graf['Spotová cena (ct/kWh)'] = (df_graf['cena_eur_kwh'] + float(marza_dodavatela)) * 100
+            df_graf['Spotová cena (ct/kWh)'] = df_graf['cena_eur_kwh'] * 100
             st.line_chart(df_graf[['Spotová cena (ct/kWh)']], height=200, color="#FF9F43")
 
 with tabs[1]:

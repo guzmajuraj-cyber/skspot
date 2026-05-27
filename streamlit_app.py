@@ -248,6 +248,43 @@ with tabs[0]:
             df_graf['Spotová cena (ct/kWh)'] = df_graf['Cena_Spot_Koncova'] * 100
             st.line_chart(df_graf[['Spotová cena (ct/kWh)']], height=200, color="#FF9F43")
 
+# --- NOVÝ VÝPOČET MULTIPLIKÁCIE ---
+# Pre výnosy z dodávky používame čistú spotovú cenu (cena_eur_kwh)
+df_final['Vynosy_Spot_EUR'] = df_final['Dodavka_kWh'] * df_final['cena_eur_kwh']
+
+# Sumárne hodnoty
+celkove_naklady_spot = df_final['Naklady_Spot_EUR'].sum()
+celkove_vynosy_spot = df_final['Vynosy_Spot_EUR'].sum()
+bilancia_netto = celkove_vynosy_spot - celkove_naklady_spot
+
+# --- ZOBRAZENIE TRETEJ TABUĽKY NA HLAVNOM ROZHRANÍ ---
+st.write("### 💶 Krok 3: Finančná bilancia (Multiplikácia)")
+t3_data = {
+    "Analytická Položka": [
+        "Celkový Odber (Multiplikovaný spotom)", 
+        "Celková Dodávka FVE (Multiplikovaná spotom)", 
+        "Čistá Finančná Bilancia (Netto)"
+    ],
+    "Množstvo [kWh]": [
+        f"{celkova_spotreba:.2f}", 
+        f"{celkova_dodavka:.2f}", 
+        f"{(celkova_dodavka - celkova_spotreba):.2f}"
+    ],
+    "Finančný dopad [€]": [
+        f"- {celkove_naklady_spot:.2f} €", 
+        f"+ {celkove_vynosy_spot:.2f} €", 
+        f"{bilancia_netto:.2f} €"
+    ]
+}
+
+# Zobrazenie tabuľky
+st.table(pd.DataFrame(t3_data))
+
+# Pridanie vysvetlenia
+st.caption("Poznámka: Náklady odberu zahŕňajú maržu dodávateľa, výnosy dodávky sú počítané čistou trhovou cenou.")
+
+Váš slide deck na tému **SpotCheck SK - Finančná Bilancia** je pripravený! Stačí si ho prezrieť a ak potrebujete akúkoľvek ďalšiu úpravu výpočtov, som tu pre vás.
+
 with tabs[1]:
     st.write("### 👀 Kontrola spracovaných dát")
     if df_spotreba is not None:

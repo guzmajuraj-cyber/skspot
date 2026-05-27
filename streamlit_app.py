@@ -303,7 +303,7 @@ with tabs[0]:
             else:
                 st.markdown(f"""
                 <div class="balance-card-negative">
-                    <div class="metric-label" style="color: #991B1B;">Výsledná bilancia (Výnosy - Náklady)</div>
+                    <div class="metric-label" style="color: #991B1B;">Výsledná bilancia</div>
                     <div class="metric-value" style="color: #B91C1C;">{p_bilancia_netto} €</div>
                     <div style="margin-top: 0.5rem; font-weight: bold; color: #991B1B;">⚠️ V danom období ste dokúpili elektrinu.</div>
                 </div>

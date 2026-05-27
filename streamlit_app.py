@@ -263,16 +263,11 @@ with tabs[1]:
         # VYČISTENÝ SUROVÝ VÝPIS Z OKTE
         st.write("#### 🔍 Surové dáta z API OKTE (Iba vybrané stĺpce):")
         if df_surove_okte is not None:
-            # Zobrazí iba tebou definované štyri stĺpce a skryje poradový index Streamlitu (hide_index=True)
+            # Zobrazí iba tebou definované štyri stĺpce a skryje poradový index Streamlitu
             st.dataframe(df_surove_okte, use_container_width=True, hide_index=True)
         else:
             st.error("❌ Žiadne surové dáta z OKTE neboli stiahnuté.")
             
-        st.write("#### 📈 Rýchly prehľad hodnôt (Súhrnné sumy a priemery)")
-        st.dataframe(df_spotreba.describe().T[['mean', 'min', 'max', 'sum']].rename(
-            index={'Spotreba_kWh': 'Odber (Suma spotreby v kWh)', 'Dodavka_kWh': 'Dodávka (Suma prebytkov FVE v kWh)'},
-            columns={'mean': 'Priemer na 15-min', 'min': 'Minimum', 'max': 'Maximum', 'sum': 'Suma spolu za celé obdobie'}
-        ), use_container_width=True)
     else:
         st.warning("📂 Najprv nahrajte súbor.")
 

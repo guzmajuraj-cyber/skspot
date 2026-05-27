@@ -283,7 +283,7 @@ st.table(pd.DataFrame(t3_data))
 # Pridanie vysvetlenia
 st.caption("Poznámka: Náklady odberu zahŕňajú maržu dodávateľa, výnosy dodávky sú počítané čistou trhovou cenou.")
 
-Váš slide deck na tému **SpotCheck SK - Finančná Bilancia** je pripravený! Stačí si ho prezrieť a ak potrebujete akúkoľvek ďalšiu úpravu výpočtov, som tu pre vás.
+
 
 with tabs[1]:
     st.write("### 👀 Kontrola spracovaných dát")

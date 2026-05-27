@@ -310,7 +310,7 @@ with tabs[0]:
                 """, unsafe_allow_html=True)
             
             # --- KONIEC ZMENENEJ SEKCIE ---
-
+"""
             st.write("### 💶 Krok 3: Finančná bilancia (Prehľadová tabuľka)")
             p_cisty_rozdiel_kwh = (celkova_dodavka_dec - celkova_spotreba_dec).quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             
@@ -345,7 +345,7 @@ with tabs[0]:
                 file_name="spotcheck_pure_spot_data.csv",
                 mime="text/csv"
             )
-            
+  """          
             st.write("### 📊 Priebeh spotreby a trhových cien")
             df_graf = df_final.copy()
             

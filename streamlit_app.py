@@ -310,7 +310,7 @@ with tabs[0]:
                 """, unsafe_allow_html=True)
             
             # --- KONIEC ZMENENEJ SEKCIE ---
-"""
+
             st.write("### 💶 Krok 3: Finančná bilancia (Prehľadová tabuľka)")
             p_cisty_rozdiel_kwh = (celkova_dodavka_dec - celkova_spotreba_dec).quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             
@@ -332,7 +332,7 @@ with tabs[0]:
                 ]
             }
             st.table(pd.DataFrame(t3_data))
-"""
+
             st.write("### 🛠️ Porovnanie s Excelom (Audit)")
             df_audit = df_final.copy()
             df_audit.index = df_audit.index.strftime('%Y-%m-%d %H:%M:%S')

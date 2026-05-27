@@ -332,7 +332,7 @@ with tabs[0]:
                 ]
             }
             st.table(pd.DataFrame(t3_data))
-
+"""
             st.write("### 🛠️ Porovnanie s Excelom (Audit)")
             df_audit = df_final.copy()
             df_audit.index = df_audit.index.strftime('%Y-%m-%d %H:%M:%S')
@@ -345,7 +345,7 @@ with tabs[0]:
                 file_name="spotcheck_pure_spot_data.csv",
                 mime="text/csv"
             )
-  """          
+           
             st.write("### 📊 Priebeh spotreby a trhových cien")
             df_graf = df_final.copy()
             

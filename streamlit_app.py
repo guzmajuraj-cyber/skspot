@@ -44,10 +44,9 @@ def stiahni_spotove_ceny(den_od, den_do):
             st.warning("⚠️ OKTE API nevrátilo pre toto obdobie žiadne dáta.")
             return None, None
             
-        # 1. VYTVORENIE FILTROVANEJ SUROVEJ TABUĽKY (LEN POŽADOVANÉ STĹPCE)
+        # 1. VYTVORENIE FILTROVANEJ SUROVEJ TABUĽKY (LEN TIE 4 ŽELANÉ STĹPCE)
         df_celkovy = pd.DataFrame(surove_data)
         pozadovane_stlpce = ['period', 'price', 'deliveryStart', 'deliveryEnd']
-        # Bezpečná kontrola, či API stĺpce obsahuje, a ich zoradenie
         existujuce_stlpce = [col for col in pozadovane_stlpce if col in df_celkovy.columns]
         df_surove = df_celkovy[existujuce_stlpce].copy()
         
@@ -169,7 +168,9 @@ def vygeneruj_vzorove_data():
         hodina = dt.hour
         zaklad = 0.4 if (7 <= hodina <= 9 or 17 <= hodina <= 22) else 0.1
         spotreba = zaklad + random.uniform(0.0, 0.3)
-        data.append({"Čas": dt, "Spotreba_kWh": round(spotreba * 0.25, 3), "Dodavka_kWh": 0.0})
+        # Pridaná simulácia prebytkov fotovoltiky počas dňa
+        dodavka = random.uniform(0.5, 1.5) if (10 <= hodina <= 16) else 0.0
+        data.append({"Čas": dt, "Spotreba_kWh": round(spotreba * 0.25, 3), "Dodavka_kWh": round(dodavka * 0.25, 3)})
     df_demo = pd.DataFrame(data)
     df_demo.set_index("Čas", inplace=True)
     return df_demo
@@ -186,7 +187,7 @@ marza_dodavatela = st.sidebar.slider("Marža spotového dodávateľa (EUR/MWh)",
 
 tabs = st.tabs(["📊 Analýza a Porovnanie", "👀 Kontrola načítaných dát", "💡 Ako získať dáta?"])
 
-# Globálne premenné na prenos dát do záložky 1
+# Globálne premenné na prenos dát medzi tabmi
 df_surove_okte = None 
 
 with tabs[0]:
@@ -213,14 +214,21 @@ with tabs[0]:
             df_final = df_spotreba.join(df_ceny_parsovane, how='left')
             df_final['cena_eur_kwh'] = df_final['cena_eur_kwh'].ffill().bfill().fillna(0.0)
             
+            # Výpočty nákladov pre odber a výnosov pre prebytky
             df_final['Cena_Spot_Koncova'] = df_final['cena_eur_kwh'] + marza_dodavatela
             df_final['Naklady_Spot_EUR'] = df_final['Spotreba_kWh'] * df_final['Cena_Spot_Koncova']
             df_final['Naklady_Fix_EUR'] = df_final['Spotreba_kWh'] * cena_fix_eur
             
+            # NOVINKA: Vynásobenie dodávky čistou spotovou cenou z trhu
+            df_final['Vynosy_Spot_EUR'] = df_final['Dodavka_kWh'] * df_final['cena_eur_kwh']
+            
             celkova_spotreba = df_final['Spotreba_kWh'].sum()
             celkova_dodavka = df_final['Dodavka_kWh'].sum()
+            
             naklady_spot_total = df_final['Naklady_Spot_EUR'].sum()
             naklady_fix_total = df_final['Naklady_Fix_EUR'].sum()
+            vynosy_spot_total = df_final['Vynosy_Spot_EUR'].sum()
+            
             uspora = naklady_fix_total - naklady_spot_total
             priemerna_cena_spot = naklady_spot_total / celkova_spotreba if celkova_spotreba > 0 else 0
             
@@ -235,6 +243,30 @@ with tabs[0]:
             with m_col2: st.markdown(f'<div class="metric-card"><div class="metric-label">Priemerná cena Spot</div><div class="metric-value">{priemerna_cena_spot*100:.2f} ct/kWh</div></div>', unsafe_allow_html=True)
             with m_col3: st.markdown(f'<div class="metric-card"><div class="metric-label">Celková Dodávka</div><div class="metric-value">{celkova_dodavka:.1f} kWh</div></div>', unsafe_allow_html=True)
             
+            # NOVÁ TRETIA TABUĽKA NA HLAVNOM ROZHRANÍ
+            st.write("### 💶 Krok 3: Finančná bilancia (Multiplikácia trhovou cenou)")
+            
+            bilancia_netto = vynosy_spot_total - naklady_spot_total
+            
+            t3_data = {
+                "Analytická položka": [
+                    "Celkový Odber (Vynásobený cenou zo spotu s maržou)", 
+                    "Celková Dodávka FVE (Vynásobená čistou cenou zo spotu)", 
+                    "Čistá finančná bilancia (Výnosy - Náklady)"
+                ],
+                "Množstvo [kWh]": [
+                    f"{celkova_spotreba:.2f} kWh", 
+                    f"{celkova_dodavka:.2f} kWh", 
+                    f"{(celkova_dodavka - celkova_spotreba):.2f} kWh"
+                ],
+                "Finančný výsledok [€]": [
+                    f"- {naklady_spot_total:.2f} €", 
+                    f"+ {vynosy_spot_total:.2f} €", 
+                    f"{bilancia_netto:.2f} €"
+                ]
+            }
+            st.table(pd.DataFrame(t3_data))
+            
             st.write("### 📊 Priebeh spotreby a trhových cien")
             df_graf = df_final.copy()
             
@@ -248,43 +280,6 @@ with tabs[0]:
             df_graf['Spotová cena (ct/kWh)'] = df_graf['Cena_Spot_Koncova'] * 100
             st.line_chart(df_graf[['Spotová cena (ct/kWh)']], height=200, color="#FF9F43")
 
-# --- NOVÝ VÝPOČET MULTIPLIKÁCIE ---
-# Pre výnosy z dodávky používame čistú spotovú cenu (cena_eur_kwh)
-df_final['Vynosy_Spot_EUR'] = df_final['Dodavka_kWh'] * df_final['cena_eur_kwh']
-
-# Sumárne hodnoty
-celkove_naklady_spot = df_final['Naklady_Spot_EUR'].sum()
-celkove_vynosy_spot = df_final['Vynosy_Spot_EUR'].sum()
-bilancia_netto = celkove_vynosy_spot - celkove_naklady_spot
-
-# --- ZOBRAZENIE TRETEJ TABUĽKY NA HLAVNOM ROZHRANÍ ---
-st.write("### 💶 Krok 3: Finančná bilancia (Multiplikácia)")
-t3_data = {
-    "Analytická Položka": [
-        "Celkový Odber (Multiplikovaný spotom)", 
-        "Celková Dodávka FVE (Multiplikovaná spotom)", 
-        "Čistá Finančná Bilancia (Netto)"
-    ],
-    "Množstvo [kWh]": [
-        f"{celkova_spotreba:.2f}", 
-        f"{celkova_dodavka:.2f}", 
-        f"{(celkova_dodavka - celkova_spotreba):.2f}"
-    ],
-    "Finančný dopad [€]": [
-        f"- {celkove_naklady_spot:.2f} €", 
-        f"+ {celkove_vynosy_spot:.2f} €", 
-        f"{bilancia_netto:.2f} €"
-    ]
-}
-
-# Zobrazenie tabuľky
-st.table(pd.DataFrame(t3_data))
-
-# Pridanie vysvetlenia
-st.caption("Poznámka: Náklady odberu zahŕňajú maržu dodávateľa, výnosy dodávky sú počítané čistou trhovou cenou.")
-
-
-
 with tabs[1]:
     st.write("### 👀 Kontrola spracovaných dát")
     if df_spotreba is not None:
@@ -297,10 +292,9 @@ with tabs[1]:
         st.write("#### 📋 Kompletné namerané dáta z vášho súboru (Odber a Dodávka):")
         st.dataframe(df_view, use_container_width=True)
         
-        # VYČISTENÝ SUROVÝ VÝPIS Z OKTE
+        # VYČISTENÝ SUROVÝ VÝPIS Z OKTE (Iba tvoje 4 stĺpce)
         st.write("#### 🔍 Surové dáta z API OKTE (Iba vybrané stĺpce):")
         if df_surove_okte is not None:
-            # Zobrazí iba tebou definované štyri stĺpce a skryje poradový index Streamlitu
             st.dataframe(df_surove_okte, use_container_width=True, hide_index=True)
         else:
             st.error("❌ Žiadne surové dáta z OKTE neboli stiahnuté.")
@@ -309,4 +303,5 @@ with tabs[1]:
         st.warning("📂 Najprv nahrajte súbor.")
 
 with tabs[2]:
-    st.write("Postup stiahnutia dát z portálu SSD...")
+    st.write("### 💡 Ako získať dáta?")
+    st.write("Postup stiahnutia dát z portálu SSD (Stredoslovenská distribučná)...")

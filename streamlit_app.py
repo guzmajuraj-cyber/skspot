@@ -27,7 +27,7 @@ st.markdown("""
 
 @st.cache_data(ttl=3600)
 def stiahni_spotove_ceny(den_od, den_do):
-    """Stiahne dáta z API OKTE a vráti surovú tabuľku AJ tabuľku pripravenú na párovanie"""
+    """Stiahne dáta z API OKTE, vyfiltruje surovú tabuľku a pripraví parsovanú na párovanie"""
     str_od = den_od.strftime("%Y-%m-%d")
     str_do = den_do.strftime("%Y-%m-%d")
     
@@ -44,8 +44,12 @@ def stiahni_spotove_ceny(den_od, den_do):
             st.warning("⚠️ OKTE API nevrátilo pre toto obdobie žiadne dáta.")
             return None, None
             
-        # 1. VYTVORENIE SUROVEJ TABUĽKY (PRESNE AKO PRIŠLA Z API)
-        df_surove = pd.DataFrame(surove_data) # Obsahuje stĺpce: deliveryDay, period, price
+        # 1. VYTVORENIE FILTROVANEJ SUROVEJ TABUĽKY (LEN POŽADOVANÉ STĹPCE)
+        df_celkovy = pd.DataFrame(surove_data)
+        pozadovane_stlpce = ['period', 'price', 'deliveryStart', 'deliveryEnd']
+        # Bezpečná kontrola, či API stĺpce obsahuje, a ich zoradenie
+        existujuce_stlpce = [col for col in pozadovane_stlpce if col in df_celkovy.columns]
+        df_surove = df_celkovy[existujuce_stlpce].copy()
         
         # 2. PRÍPRAVA PARSOVANEJ TABUĽKY PRE GRAFY A PREPOČTY
         ceny_parsovane = []
@@ -247,7 +251,7 @@ with tabs[0]:
 with tabs[1]:
     st.write("### 👀 Kontrola spracovaných dát")
     if df_spotreba is not None:
-        # Výpis tvojej distribučnej tabuľky
+        # Výpis distribučnej tabuľky
         df_view = df_spotreba.copy()
         df_view.index = df_view.index.strftime('%Y-%m-%d %H:%M:%S')
         df_view.index.name = 'Dátum a Čas (upravený pre OKTE)'
@@ -256,11 +260,11 @@ with tabs[1]:
         st.write("#### 📋 Kompletné namerané dáta z vášho súboru (Odber a Dodávka):")
         st.dataframe(df_view, use_container_width=True)
         
-        # NOVÝ SUROVÝ VÝPIS Z OKTE (BEZ ÚPRAV)
-        st.write("#### 🔍 Surové dáta z API OKTE (Presne ako prišli zo serveru):")
+        # VYČISTENÝ SUROVÝ VÝPIS Z OKTE
+        st.write("#### 🔍 Surové dáta z API OKTE (Iba vybrané stĺpce):")
         if df_surove_okte is not None:
-            # Zobrazí presne stĺpce deliveryDay, period, price bez modifikácie indexu či hodnôt
-            st.dataframe(df_surove_okte, use_container_width=True)
+            # Zobrazí iba tebou definované štyri stĺpce a skryje poradový index Streamlitu (hide_index=True)
+            st.dataframe(df_surove_okte, use_container_width=True, hide_index=True)
         else:
             st.error("❌ Žiadne surové dáta z OKTE neboli stiahnuté.")
             

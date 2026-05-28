@@ -237,12 +237,12 @@ else:
     cena_vt_raw = st.sidebar.text_input(
         "Cena vo vysokej tarife - VT (centov / kWh):", 
         value="18.5", 
-        help="Zadajte presnú cenu pre Vysokú Tarifu (VT) z vašej zmluvy v centoch za kWh."
+        help="Zadajte presnú cenu pre Vysokú Tarifu (VT) bez distribúcie v centoch za kWh."
     )
     cena_nt_raw = st.sidebar.text_input(
         "Cena v nízkej tarife - NT (centov / kWh):", 
         value="12.0", 
-        help="Zadajte presnú cenu pre Nízku Tarifu (NT) z vašej zmluvy v centoch za kWh."
+        help="Zadajte presnú cenu pre Nízku Tarifu (NT) bez distribúcie v centoch za kWh."
     )
     
     cena_vt_cista = cena_vt_raw.replace(",", ".").strip()

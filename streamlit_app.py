@@ -179,28 +179,23 @@ def vygeneruj_vzorove_data():
 
 
 def skontroluj_platnost_vt(aktualny_cas, intervaly_vt):
-    """Pomocná funkcia na preverenie, či daný čas patrí do zadaných intervalov VT."""
     t = aktualny_cas.time()
     for start, end in intervaly_vt:
         if start <= end:
             if start <= t <= end:
                 return True
-        else:  # Interval prechádza cez polnoc (napr. 22:00 - 06:00)
+        else:
             if t >= start or t <= end:
                 return True
     return False
 
 
 def parsuj_casy_vt(text_casov):
-    """Naparsuje textový reťazec typu '08:00-12:00, 16:00-20:00' na zoznam časových objektov."""
     intervaly = []
     if not text_casov:
         return intervaly
-    
-    # Odstránenie medzier a rozdelenie podľa čiarok
     bloky = text_casov.replace(" ", "").split(",")
     vzor = re.compile(r"^([0-1]?[0-9]|2[0-3]):([0-5][0-9])-([0-1]?[0-9]|2[0-3]):([0-5][0-9])$")
-    
     for blok in bloky:
         if vzor.match(blok):
             časti = blok.split("-")
@@ -220,20 +215,56 @@ st.sidebar.header("⚙️ Nastavenia")
 typ_tarify = st.sidebar.radio("Typ vašej súčasnej tarify:", ["Jednotarif", "Dvojtarif"])
 
 intervaly_vt = []
+
 if typ_tarify == "Jednotarif":
-    cena_fix_input = st.sidebar.slider("Vaša cena silovej zložky bez distribúcie (centov / kWh)", 10.0, 25.0, 16.5, 0.5)
-    cena_fix_eur_vt = Decimal(str(cena_fix_input)) / Decimal('100.0')
+    # Manuálne zadanie ceny pre jednotarif s nápovedou ?
+    cena_fix_raw = st.sidebar.text_input(
+        "Vaša cena silovej zložky bez distribúcie (centov / kWh):", 
+        value="16.5", 
+        help="Zadajte presnú cenu čistej silovej komodity z vašej faktúry alebo zmluvy v centoch za kWh (napr. 16.5 alebo 16,425)."
+    )
+    # Vyčistenie a konverzia na Decimal (zvládne bodky aj čiarky)
+    cena_fix_cista = cena_fix_raw.replace(",", ".").strip()
+    try:
+        cena_fix_eur_vt = Decimal(cena_fix_cista) / Decimal('100.0')
+    except:
+        st.sidebar.error("❌ Neplatný formát ceny! Zadajte číslo (napr. 16.5)")
+        cena_fix_eur_vt = Decimal('0.165')
     cena_fix_eur_nt = cena_fix_eur_vt
+
 else:
-    col_vt, col_nt = st.sidebar.columns(2)
-    with col_vt:
-        cena_vt_input = st.slider("Cena VT (centov / kWh)", 12.0, 30.0, 18.5, 0.5)
-        cena_fix_eur_vt = Decimal(str(cena_vt_input)) / Decimal('100.0')
-    with col_nt:
-        cena_nt_input = st.slider("Cena NT (centov / kWh)", 8.0, 20.0, 12.0, 0.5)
-        cena_fix_eur_nt = Decimal(str(cena_nt_input)) / Decimal('100.0')
+    # Manuálne zadanie ceny pre dvojtarif (VT a NT) s nápovedou ?
+    cena_vt_raw = st.sidebar.text_input(
+        "Cena vo vysokej tarife - VT (centov / kWh):", 
+        value="18.5", 
+        help="Zadajte presnú cenu pre Vysokú Tarifu (VT) z vašej zmluvy v centoch za kWh."
+    )
+    cena_nt_raw = st.sidebar.text_input(
+        "Cena v nízkej tarife - NT (centov / kWh):", 
+        value="12.0", 
+        help="Zadajte presnú cenu pre Nízku Tarifu (NT) z vašej zmluvy v centoch za kWh."
+    )
+    
+    cena_vt_cista = cena_vt_raw.replace(",", ".").strip()
+    cena_nt_cista = cena_nt_raw.replace(",", ".").strip()
+    
+    try:
+        cena_fix_eur_vt = Decimal(cena_vt_cista) / Decimal('100.0')
+    except:
+        st.sidebar.error("❌ Neplatný formát ceny VT!")
+        cena_fix_eur_vt = Decimal('0.185')
         
-    casy_vt_text = st.sidebar.text_input("Zadajte časy kedy platí VT:", value="08:00-12:00, 16:00-20:00", help="Formát: HH:MM-HH:MM, oddelené čiarkou")
+    try:
+        cena_fix_eur_nt = Decimal(cena_nt_cista) / Decimal('100.0')
+    except:
+        st.sidebar.error("❌ Neplatný formát ceny NT!")
+        cena_fix_eur_nt = Decimal('0.120')
+        
+    casy_vt_text = st.sidebar.text_input(
+        "Zadajte časy kedy platí VT:", 
+        value="08:00-12:00, 16:00-20:00", 
+        help="Formát: HH:MM-HH:MM, oddelené čiarkou (napr. 08:00-12:00, 16:00-20:00)"
+    )
     intervaly_vt = parsuj_casy_vt(casy_vt_text)
     if not intervaly_vt and casy_vt_text:
         st.sidebar.error("❌ Nesprávny formát časov VT! Použite napr: 08:00-12:00, 16:00-20:00")
@@ -303,7 +334,6 @@ with tabs[0]:
                 dodavka_15m = Decimal(str(row['Dodavka_kWh']))
                 cena_trhova = Decimal(str(row['cena_eur_kwh']))
                 
-                # Určenie prislúchajúcej fixnej ceny na základe tarify a času
                 if typ_tarify == "Jednotarif":
                     aktualna_cena_fix = cena_fix_eur_vt
                 else:

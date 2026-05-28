@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import io
 from decimal import Decimal, ROUND_HALF_UP
+import re
 
-# Nastavenie konfigurácie stránky - opravený import a volanie st
+# Nastavenie konfigurácie stránky
 st.set_page_config(
     page_title="SpotCheck SK - Prepočet Spotovej Elektriny",
     page_icon="⚡",
@@ -176,6 +177,38 @@ def vygeneruj_vzorove_data():
     df_demo.set_index("Čas", inplace=True)
     return df_demo
 
+
+def skontroluj_platnost_vt(aktualny_cas, intervaly_vt):
+    """Pomocná funkcia na preverenie, či daný čas patrí do zadaných intervalov VT."""
+    t = aktualny_cas.time()
+    for start, end in intervaly_vt:
+        if start <= end:
+            if start <= t <= end:
+                return True
+        else:  # Interval prechádza cez polnoc (napr. 22:00 - 06:00)
+            if t >= start or t <= end:
+                return True
+    return False
+
+
+def parsuj_casy_vt(text_casov):
+    """Naparsuje textový reťazec typu '08:00-12:00, 16:00-20:00' na zoznam časových objektov."""
+    intervaly = []
+    if not text_casov:
+        return intervaly
+    
+    # Odstránenie medzier a rozdelenie podľa čiarok
+    bloky = text_casov.replace(" ", "").split(",")
+    vzor = re.compile(r"^([0-1]?[0-9]|2[0-3]):([0-5][0-9])-([0-1]?[0-9]|2[0-3]):([0-5][0-9])$")
+    
+    for blok in bloky:
+        if vzor.match(blok):
+            časti = blok.split("-")
+            h1, m1 = map(int, časti[0].split(":"))
+            h2, m2 = map(int, časti[1].split(":"))
+            intervaly.append((time(h1, m1), time(h2, m2)))
+    return intervaly
+
 # --- HLAVNÉ ROZHRANIE ---
 st.markdown('<div class="main-title">⚡ SpotCheck Slovensko</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-title">Porovnanie fixných a reálnych spotových cien z OKTE.</div>', unsafe_allow_html=True)
@@ -183,11 +216,29 @@ st.markdown('<div class="sub-title">Porovnanie fixných a reálnych spotových c
 # --- BOČNÝ PANEL (SIDEBAR) ---
 st.sidebar.header("⚙️ Nastavenia")
 
-# Premenovaný parameter pre fixnú cenu podľa požiadavky
-cena_fix_input = st.sidebar.slider("Vaša cena silovej zložky bez distribúcie (centov / kWh)", 10.0, 25.0, 16.5, 0.5)
-cena_fix_eur = Decimal(str(cena_fix_input)) / Decimal('100.0')
+# Výber typu tarify
+typ_tarify = st.sidebar.radio("Typ vašej súčasnej tarify:", ["Jednotarif", "Dvojtarif"])
 
-# Odstránený slider marže - parameter je interne nastavený na 0
+intervaly_vt = []
+if typ_tarify == "Jednotarif":
+    cena_fix_input = st.sidebar.slider("Vaša cena silovej zložky bez distribúcie (centov / kWh)", 10.0, 25.0, 16.5, 0.5)
+    cena_fix_eur_vt = Decimal(str(cena_fix_input)) / Decimal('100.0')
+    cena_fix_eur_nt = cena_fix_eur_vt
+else:
+    col_vt, col_nt = st.sidebar.columns(2)
+    with col_vt:
+        cena_vt_input = st.slider("Cena VT (centov / kWh)", 12.0, 30.0, 18.5, 0.5)
+        cena_fix_eur_vt = Decimal(str(cena_vt_input)) / Decimal('100.0')
+    with col_nt:
+        cena_nt_input = st.slider("Cena NT (centov / kWh)", 8.0, 20.0, 12.0, 0.5)
+        cena_fix_eur_nt = Decimal(str(cena_nt_input)) / Decimal('100.0')
+        
+    casy_vt_text = st.sidebar.text_input("Zadajte časy kedy platí VT:", value="08:00-12:00, 16:00-20:00", help="Formát: HH:MM-HH:MM, oddelené čiarkou")
+    intervaly_vt = parsuj_casy_vt(casy_vt_text)
+    if not intervaly_vt and casy_vt_text:
+        st.sidebar.error("❌ Nesprávny formát časov VT! Použite napr: 08:00-12:00, 16:00-20:00")
+
+# Marža zostáva interne vynulovaná
 marza_dodavatela = Decimal('0.0')
 
 # Definícia všetkých záložiek
@@ -252,8 +303,15 @@ with tabs[0]:
                 dodavka_15m = Decimal(str(row['Dodavka_kWh']))
                 cena_trhova = Decimal(str(row['cena_eur_kwh']))
                 
+                # Určenie prislúchajúcej fixnej ceny na základe tarify a času
+                if typ_tarify == "Jednotarif":
+                    aktualna_cena_fix = cena_fix_eur_vt
+                else:
+                    is_vt = skontroluj_platnost_vt(index, intervaly_vt)
+                    aktualna_cena_fix = cena_fix_eur_vt if is_vt else cena_fix_eur_nt
+                
                 n_spot = spotreba_15m * cena_trhova
-                n_fix = spotreba_15m * cena_fix_eur
+                n_fix = spotreba_15m * aktualna_cena_fix
                 v_spot = dodavka_15m * cena_trhova
                 
                 naklady_spot_list.append(float(n_spot))
@@ -274,6 +332,7 @@ with tabs[0]:
             uspora = naklady_fix_total - naklady_spot_total
             bilancia_netto = vynosy_spot_total - naklady_spot_total
             
+            p_naklady_fix_total = naklady_fix_total.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             p_celkova_spotreba = celkova_spotreba_dec.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             p_celkova_dodavka = celkova_dodavka_dec.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             p_naklady_spot_total = naklady_spot_total.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
@@ -284,9 +343,9 @@ with tabs[0]:
             st.write("### 📈 Krok 2: Finálny verdikt")
             
             if uspora > 0:
-                st.success(f"🎉 Na čistom spote by ste v súbore `{vybrany_subor_nazov}` ušetrili **{p_uspora} EUR** voči fixnej tarife.")
+                st.success(f"🎉 Na čistom spote by ste v súbore `{vybrany_subor_nazov}` ušetrili **{p_uspora} EUR** voči vašej fixnej tarife ({typ_tarify}).")
             else:
-                st.warning(f"⚠️ Na čistom spote by ste v súbore `{vybrany_subor_nazov}` preplatili **{abs(p_uspora)} EUR** voči fixnej tarife.")
+                st.warning(f"⚠️ Na čistom spote by ste v súbore `{vybrany_subor_nazov}` preplatili **{abs(p_uspora)} EUR** voči vašej fixnej tarife ({typ_tarify}).")
             
             col_odber, col_dodavka = st.columns(2)
             
@@ -336,16 +395,19 @@ with tabs[0]:
             t3_data = {
                 "Analytická položka": [
                     "Celkový Odber (Vynásobený čistou cenou zo spotu)", 
+                    "Celkový Odber (Pri vašej pôvodnej fixnej tarife)",
                     "Celková Dodávka FVE (Vynásobená čistou cenou zo spotu)", 
-                    "Čistá finančná bilancia (Výnosy - Náklady)"
+                    "Čistá finančná bilancia na spote (Výnosy - Náklady)"
                 ],
                 "Množstvo [kWh]": [
                     f"{p_celkova_spotreba} kWh", 
+                    f"{p_celkova_spotreba} kWh",
                     f"{p_celkova_dodavka} kWh", 
                     f"{p_cisty_rozdiel_kwh} kWh"
                 ],
                 "Finančný výsledok [€]": [
                     f"- {p_naklady_spot_total} €", 
+                    f"- {p_naklady_fix_total} €",
                     f"+ {p_vynosy_spot_total} €", 
                     f"{p_bilancia_netto} €"
                 ]
@@ -368,7 +430,7 @@ with tabs[0]:
             st.write("### 📊 Priebeh spotreby a trhových cien")
             df_graf = df_final.copy()
             
-            st.write("#### 🔌 Vaša spotreba a dodávka do siete (kWh)")
+            st.write("#### 🔌 Vaša spotreba a dodávka do siet’e (kWh)")
             graf_dict = {'Odber (kWh)': df_graf['Spotreba_kWh']}
             if float(p_celkova_dodavka) > 0:
                 graf_dict['Dodávka (kWh)'] = df_graf['Dodavka_kWh']
@@ -472,12 +534,11 @@ with tabs[3]:
         else:
             st.warning(f"⚠️ Pre dátum {vybrany_den.strftime('%d.%m.%Y')} zatiaľ burza OKTE nezverejnila dáta.")
 
-# --- TAB 5: SPÄTNÁ VÄZBA (ČISTÝ VZHĽAD BEZ NEAKTÍVNEHO POĽA) ---
+# --- TAB 5: SPÄTNÁ VÄZBA ---
 with tabs[4]:
     st.write("### 💬 Nápady, vylepšenia a spätná väzba")
     st.write("Našli ste v aplikácii chybu, nesedia vám výpočty s faktúrou alebo by ste chceli doplniť novú funkciu? Napíšte mi.")
     
-    # Vyčistený jednoradkový HTML formulár - štýlovanie vložené priamo do <form>
     form_html_jednoradkovy = (
         '<form action="https://formsubmit.co/guzmajuraj@gmail.com" method="POST" style="background-color: #F9FAFB; padding: 2rem; border-radius: 0.5rem; border: 1px solid #E5E7EB; max-width: 600px;">'
         '<input type="hidden" name="_subject" value="SpotCheck SK - Nova spatna vazba!">'
@@ -492,7 +553,6 @@ with tabs[4]:
     
     st.markdown(form_html_jednoradkovy, unsafe_allow_html=True)
     
-    # Alternatívny mailto odkaz pod boxom
     st.write("")
     st.write("---")
     st.write("Alternatívne mi môžete poslať e-mail priamo z vašej poštovej schránky:")

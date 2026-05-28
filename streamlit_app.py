@@ -221,7 +221,7 @@ if typ_tarify == "Jednotarif":
     cena_fix_raw = st.sidebar.text_input(
         "Vaša cena silovej zložky bez distribúcie (centov / kWh):", 
         value="16.5", 
-        help="Zadajte presnú cenu čistej silovej komodity z vašej faktúry alebo zmluvy v centoch za kWh (napr. 16.5 alebo 16,425)."
+        help="Zadajte cenu čistej silovej komodity v centoch za kWh (napr. 16.5 alebo 16,425)."
     )
     # Vyčistenie a konverzia na Decimal (zvládne bodky aj čiarky)
     cena_fix_cista = cena_fix_raw.replace(",", ".").strip()
@@ -237,12 +237,12 @@ else:
     cena_vt_raw = st.sidebar.text_input(
         "Cena vo vysokej tarife - VT (centov / kWh):", 
         value="18.5", 
-        help="Zadajte presnú cenu pre Vysokú Tarifu (VT) bez distribúcie v centoch za kWh."
+        help="Zadajte cenu čistej silovej komodity pre Vysokú Tarifu (VT) bez distribúcie v centoch za kWh."
     )
     cena_nt_raw = st.sidebar.text_input(
         "Cena v nízkej tarife - NT (centov / kWh):", 
         value="12.0", 
-        help="Zadajte presnú cenu pre Nízku Tarifu (NT) bez distribúcie v centoch za kWh."
+        help="Zadajte cenu čistej silovej komodity pre Nízku Tarifu (NT) bez distribúcie v centoch za kWh."
     )
     
     cena_vt_cista = cena_vt_raw.replace(",", ".").strip()

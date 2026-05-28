@@ -43,12 +43,10 @@ def stiahni_spotove_ceny(den_od, den_do):
     try:
         response = requests.get(url, timeout=15)
         if response.status_code != 200:
-            st.error(f"❌ Chyba OKTE API (Kód {response.status_code})")
             return None, None
             
         surove_data = response.json()
         if not surove_data:
-            st.warning("⚠️ OKTE API nevrátilo pre toto obdobie žiadne dáta.")
             return None, None
             
         df_celkovy = pd.DataFrame(surove_data)
@@ -189,7 +187,8 @@ cena_fix_eur = Decimal(str(cena_fix_input)) / Decimal('100.0')
 marza_dodavatela_input = st.sidebar.slider("Marža spotového dodávateľa (EUR/MWh)", 5, 25, 15, 1)
 marza_dodavatela = Decimal(str(marza_dodavatela_input)) / Decimal('1000.0')
 
-tabs = st.tabs(["📊 Analýza a Porovnanie", "👀 Kontrola načítaných dát", "💡 Ako získať dáta?"])
+# Pridaný štvrtý tab: "📅 Denné ceny OKTE"
+tabs = st.tabs(["📊 Analýza a Porovnanie", "👀 Kontrola načítaných dát", "💡 Ako získať dáta?", "📅 Denné ceny OKTE"])
 
 df_surove_okte = None 
 df_spotreba = None
@@ -200,7 +199,6 @@ with tabs[0]:
     uploaded_files = st.file_uploader("Nahrajte exporty z SSD (Môžete vybrať viacero súborov naraz)", type=["csv", "xlsx", "xls"], accept_multiple_files=True)
     use_demo = st.checkbox("Použiť Demo ukážku", value=not uploaded_files)
     
-    # NOVINKA: Rozdelenie riadku pre Selectbox a Informáciu o sledovanom období
     col_select, col_period = st.columns([1, 1])
     
     if uploaded_files:
@@ -213,18 +211,15 @@ with tabs[0]:
         df_spotreba = vygeneruj_vzorove_data()
         vybrany_subor_nazov = "Demo ukážka"
         with col_select:
-            # Neaktívny selectbox pri demo dátach, aby držal vizuálnu štruktúru
             st.selectbox("🎯 Vyberte mesiac na analýzu:", ["Demo ukážka"], disabled=True)
             
     if df_spotreba is not None:
         min_date = df_spotreba.index.min()
         max_date = df_spotreba.index.max()
         
-        # Sformátovanie dátumov pre zobrazenie
         str_od_zobrazenie = min_date.strftime("%d.%m.%Y %H:%M")
         str_do_zobrazenie = max_date.strftime("%d.%m.%Y %H:%M")
         
-        # Vpísanie sledovaného obdobia vedľa výberového menu
         with col_period:
             st.markdown(f"""
             <div class="period-info-card">
@@ -407,3 +402,72 @@ with tabs[1]:
 with tabs[2]:
     st.write("### 💡 Ako získať dáta?")
     st.write("Postup stiahnutia dát z portálu SSD (Stredoslovenská distribučná)...")
+
+# --- NOVÝ TAB: NAČÍTANIE SPOTU PODĽA KALENDÁRA ---
+with tabs[3]:
+    st.write("### 📅 Sledovanie denných burzových cien OKTE")
+    st.write("Vyberte si ľubovoľný deň z kalendára na stiahnutie reálnych cien z krátkodobého trhu s elektrinou.")
+    
+    # Výber dňa pomocou natívneho kalendára (prednastavený je dnešok)
+    vybrany_den = st.date_input("📆 Zvoľte dátum:", datetime.now().date())
+    
+    if vybrany_den:
+        with st.spinner(f"⏳ Sťahujem ceny z OKTE pre deň {vybrany_den.strftime('%d.%m.%Y')}..."):
+            # Použijeme rovnakú robustnú API funkciu pre jeden deň (od vybraného dňa do vybraného dňa)
+            df_surove_den, df_parsovane_den = stiahni_spotove_ceny(vybrany_den, vybrany_den)
+            
+        if df_parsovane_den is not None and not df_parsovane_den.empty:
+            
+            # Priebeh ceny pre graf (chceme zobraziť v centoch za kWh s DPH)
+            df_den_graf = df_parsovane_den.copy()
+            df_den_graf['Cena (cent/kWh s DPH)'] = df_den_graf['cena_eur_kwh'] * 100
+            
+            # Zmena indexu na text, aby bol graf na osi X prehľadný podľa hodín
+            df_den_graf.index = df_den_graf.index.strftime('%H:%M')
+            df_den_graf.index.name = 'Hodina dňa'
+            
+            st.write(f"#### 📊 Graf vývoja spotovej ceny na deň {vybrany_den.strftime('%d.%m.%Y')} (centy/kWh s DPH)")
+            st.line_chart(df_den_graf[['Cena (cent/kWh s DPH)']], height=300, color="#FF9F43")
+            
+            st.write("#### 📋 Tabuľkový prehľad cien po hodinách")
+            
+            # Výpočet cien spätne do prehľadnej štruktúry pre audit a tabuľku
+            tabulka_data = []
+            if df_surove_den is not None and not df_surove_den.empty:
+                for idx, row in df_surove_den.iterrows():
+                    perioda = int(row['period'])
+                    cena_mwh_surova = float(row['price'])
+                    
+                    # Formát štvrťhodín na celé hodiny pre lepšiu ľudskú čitateľnosť (keďže OKTE vracia 15min intervaly)
+                    # Perioda 1-4 je prvá hodina (00:00 - 01:00) atď.
+                    hod_start = (perioda - 1) // 4
+                    min_start = ((perioda - 1) % 4) * 15
+                    cas_label = f"{hod_start:02d}:{min_start:02d}"
+                    
+                    cena_kwh_cista = cena_mwh_surova / 1000.0
+                    cena_kwh_centy = cena_kwh_cista * 100
+                    
+                    tabulka_data.append({
+                        "Časový interval (od)": cas_label,
+                        "Perioda (OKTE)": perioda,
+                        "Cena [EUR / MWh]": round(cena_mwh_surova, 2),
+                        "Čistá komodita [EUR / kWh]": round(cena_kwh_cista, 5),
+                        "Cena [cent / kWh s DPH]": round(cena_kwh_centy, 3)
+                    })
+                
+                df_denna_tabulka = pd.DataFrame(tabulka_data)
+                
+                # Zobrazenie interaktívnej tabuľky
+                st.dataframe(df_denna_tabulka, use_container_width=True, hide_index=True)
+                
+                # Možnosť stiahnutia jednodňového reportu
+                csv_buffer_den = io.StringIO()
+                df_denna_tabulka.to_csv(csv_buffer_den, sep=';', index=False)
+                st.download_button(
+                    label=f"📥 Stiahnuť ceny pre deň {vybrany_den.strftime('%d.%m.%Y')} do Excelu (.csv)",
+                    data=csv_buffer_den.getvalue(),
+                    file_name=f"OKTE_ceny_{vybrany_den.strftime('%Y-%m-%d')}.csv",
+                    mime="text/csv"
+                )
+        else:
+            st.warning(f"⚠️ Pre dátum {vybrany_den.strftime('%d.%m.%Y')} zatiaľ burza OKTE nezverejnila dáta, alebo nastala chyba v komunikácii s API.")

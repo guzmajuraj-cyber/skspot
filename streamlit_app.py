@@ -24,7 +24,7 @@ st.markdown("""
     .main-title { font-size: 2.5rem; color: #1E3A8A; font-weight: 700; margin-bottom: 0.5rem; }
     .sub-title { font-size: 1.1rem; color: #4B5563; margin-bottom: 2rem; }
     .metric-card { background-color: #F3F4F6; padding: 1.2rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 5px solid #3B82F6; margin-bottom: 1rem; }
-    .metric-value { font-size: 1.6rem; font-weight: bold; color: #111827; }
+    .metric-value { font-size: 1.5rem; font-weight: bold; color: #111827; }
     .metric-label { font-size: 0.9rem; color: #6B7280; font-weight: 600; }
     .balance-card-positive { background-color: #ECFDF5; padding: 1.5rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 5px solid #10B981; }
     .balance-card-negative { background-color: #FEF2F2; padding: 1.5rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 5px solid #EF4444; }
@@ -217,13 +217,11 @@ typ_tarify = st.sidebar.radio("Typ vašej súčasnej tarify:", ["Jednotarif", "D
 intervaly_vt = []
 
 if typ_tarify == "Jednotarif":
-    # Manuálne zadanie ceny pre jednotarif s nápovedou ?
     cena_fix_raw = st.sidebar.text_input(
         "Vaša cena silovej zložky bez distribúcie (centov / kWh):", 
         value="16.5", 
-        help="Zadajte cenu čistej silovej komodity v centoch za kWh (napr. 16.5 alebo 16,425)."
+        help="Zadajte presnú cenu čistej silovej komodity z vašej faktúry alebo zmluvy v centoch za kWh (napr. 16.5 alebo 16,425)."
     )
-    # Vyčistenie a konverzia na Decimal (zvládne bodky aj čiarky)
     cena_fix_cista = cena_fix_raw.replace(",", ".").strip()
     try:
         cena_fix_eur_vt = Decimal(cena_fix_cista) / Decimal('100.0')
@@ -233,16 +231,15 @@ if typ_tarify == "Jednotarif":
     cena_fix_eur_nt = cena_fix_eur_vt
 
 else:
-    # Manuálne zadanie ceny pre dvojtarif (VT a NT) s nápovedou ?
     cena_vt_raw = st.sidebar.text_input(
         "Cena vo vysokej tarife - VT (centov / kWh):", 
         value="18.5", 
-        help="Zadajte cenu čistej silovej komodity pre Vysokú Tarifu (VT) bez distribúcie v centoch za kWh."
+        help="Zadajte presnú cenu pre Vysokú Tarifu (VT) z vašej zmluvy v centoch za kWh."
     )
     cena_nt_raw = st.sidebar.text_input(
         "Cena v nízkej tarife - NT (centov / kWh):", 
         value="12.0", 
-        help="Zadajte cenu čistej silovej komodity pre Nízku Tarifu (NT) bez distribúcie v centoch za kWh."
+        help="Zadajte presnú cenu pre Nízku Tarifu (NT) z vašej zmluvy v centoch za kWh."
     )
     
     cena_vt_cista = cena_vt_raw.replace(",", ".").strip()
@@ -325,7 +322,8 @@ with tabs[0]:
             
             naklady_spot_list = []
             naklady_fix_list = []
-            vynosy_spot_list = []
+            vynonosy_spot_list = []
+            vynosy_fix_list = []
             celkova_spotreba_dec = Decimal('0.0')
             celkova_dodavka_dec = Decimal('0.0')
             
@@ -334,112 +332,133 @@ with tabs[0]:
                 dodavka_15m = Decimal(str(row['Dodavka_kWh']))
                 cena_trhova = Decimal(str(row['cena_eur_kwh']))
                 
+                # Výber prislúchajúcej fixnej ceny podľa zvolenej tarify a času
                 if typ_tarify == "Jednotarif":
                     aktualna_cena_fix = cena_fix_eur_vt
                 else:
                     is_vt = skontroluj_platnost_vt(index, intervaly_vt)
                     aktualna_cena_fix = cena_fix_eur_vt if is_vt else cena_fix_eur_nt
                 
+                # Výpočty pre 15-minútovku
                 n_spot = spotreba_15m * cena_trhova
                 n_fix = spotreba_15m * aktualna_cena_fix
                 v_spot = dodavka_15m * cena_trhova
+                v_fix = dodavka_15m * aktualna_cena_fix
                 
                 naklady_spot_list.append(float(n_spot))
                 naklady_fix_list.append(float(n_fix))
-                vynosy_spot_list.append(float(v_spot))
+                vynonosy_spot_list.append(float(v_spot))
+                vynosy_fix_list.append(float(v_fix))
                 
                 celkova_spotreba_dec += spotreba_15m
                 celkova_dodavka_dec += dodavka_15m
                 
             df_final['Naklady_Spot_EUR'] = naklady_spot_list
             df_final['Naklady_Fix_EUR'] = naklady_fix_list
-            df_final['Vynosy_Spot_EUR'] = vynosy_spot_list
+            df_final['Vynosy_Spot_EUR'] = vynonosy_spot_list
+            df_final['Vynosy_Fix_EUR'] = vynosy_fix_list
             
             naklady_spot_total = sum(Decimal(str(x)) for x in naklady_spot_list)
             naklady_fix_total = sum(Decimal(str(x)) for x in naklady_fix_list)
-            vynosy_spot_total = sum(Decimal(str(x)) for x in vynosy_spot_list)
+            vynosy_spot_total = sum(Decimal(str(x)) for x in vynonosy_spot_list)
+            vynosy_fix_total = sum(Decimal(str(x)) for x in vynosy_fix_list)
             
-            uspora = naklady_fix_total - naklady_spot_total
-            bilancia_netto = vynosy_spot_total - naklady_spot_total
+            # Výpočet čistej bilancie (Výnosy - Náklady) pre oba systémy
+            bilancia_spot_netto = vynosy_spot_total - naklady_spot_total
+            bilancia_fix_netto = vynosy_fix_total - naklady_fix_total
             
-            p_naklady_fix_total = naklady_fix_total.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
+            # Finálny rozdiel medzi Spotom a Fixom
+            # Ak je bilancia spotu lepšia (vyššia/menej záporná) ako bilancia fixu, spot sa oplatil.
+            uspora_celkova = bilancia_spot_netto - bilancia_fix_netto
+            
             p_celkova_spotreba = celkova_spotreba_dec.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             p_celkova_dodavka = celkova_dodavka_dec.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
+            
             p_naklady_spot_total = naklady_spot_total.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
+            p_naklady_fix_total = naklady_fix_total.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             p_vynosy_spot_total = vynosy_spot_total.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
-            p_uspora = uspora.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
-            p_bilancia_netto = bilancia_netto.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
+            p_vynosy_fix_total = vynosy_fix_total.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
+            
+            p_bilancia_spot_netto = bilancia_spot_netto.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
+            p_bilancia_fix_netto = bilancia_fix_netto.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
+            p_uspora_celkova = uspora_celkova.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             
             st.write("### 📈 Krok 2: Finálny verdikt")
             
-            if uspora > 0:
-                st.success(f"🎉 Na čistom spote by ste v súbore `{vybrany_subor_nazov}` ušetrili **{p_uspora} EUR** voči vašej fixnej tarife ({typ_tarify}).")
+            if uspora_celkova > 0:
+                st.success(f"🎉 **Spotový trh sa vám vyplatil!** Vaša celková čistá bilancia na spote je o **{p_uspora_celkova} EUR** lepšia ako pri vašom fixnom dodávateľovi ({typ_tarify}).")
             else:
-                st.warning(f"⚠️ Na čistom spote by ste v súbore `{vybrany_subor_nazov}` preplatili **{abs(p_uspora)} EUR** voči vašej fixnej tarife ({typ_tarify}).")
+                st.warning(f"⚠️ **Fixná tarifa bola v tomto období výhodnejšia.** Na spote by ste v porovnaní s fixným dodávateľom ({typ_tarify}) stratili / prerobili **{abs(p_uspora_celkova)} EUR**.")
             
+            # Vizualizácia kľúčových metrík pomocou dvoch stĺpcov
             col_odber, col_dodavka = st.columns(2)
             
             with col_odber:
                 st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">Celkový Odber</div>
-                    <div class="metric-value">{p_celkova_spotreba} kWh</div>
+                <div class="metric-card" style="border-left-color: #EF4444;">
+                    <div class="metric-label">📊 CELKOVÝ ODBER: {p_celkova_spotreba} kWh</div>
                     <hr style='margin: 0.5rem 0; border: 0; border-top: 1px solid #D1D5DB;'>
-                    <div class="metric-label">Celkový Odber (Vynásobený čistou cenou zo spotu)</div>
+                    <div class="metric-label">Celkový Odber (Čistá cena SPOT)</div>
                     <div class="metric-value" style="color: #DC2626;">- {p_naklady_spot_total} €</div>
+                    <div class="metric-label" style="margin-top:0.4rem;">Celkový Odber (Vaša cena od dodávateľa)</div>
+                    <div class="metric-value" style="color: #9B2C2C; font-size:1.3rem;">- {p_naklady_fix_total} €</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
             with col_dodavka:
                 st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">Celková Dodávka</div>
-                    <div class="metric-value">{p_celkova_dodavka} kWh</div>
+                <div class="metric-card" style="border-left-color: #10B981;">
+                    <div class="metric-label">📊 CELKOVÁ DODÁVKA: {p_celkova_dodavka} kWh</div>
                     <hr style='margin: 0.5rem 0; border: 0; border-top: 1px solid #D1D5DB;'>
-                    <div class="metric-label">Celková Dodávka FVE (Vynásobená čistou cenou zo spotu)</div>
+                    <div class="metric-label">Celková Dodávka FVE (Čistá cena SPOT)</div>
                     <div class="metric-value" style="color: #16A34A;">+ {p_vynosy_spot_total} €</div>
+                    <div class="metric-label" style="margin-top:0.4rem;">Celková Dodávka FVE (Vaša cena od dodávateľa)</div>
+                    <div class="metric-value" style="color: #115E59; font-size:1.3rem;">+ {p_vynosy_fix_total} €</div>
                 </div>
                 """, unsafe_allow_html=True)
             
-            st.write("#### Čistá finančná bilancia")
-            if bilancia_netto >= 0:
-                st.markdown(f"""
-                <div class="balance-card-positive">
-                    <div class="metric-label" style="color: #065F46;">Výsledná bilancia (Výnosy - Náklady)</div>
-                    <div class="metric-value" style="color: #047857;">+ {p_bilancia_netto} €</div>
-                    <div style="margin-top: 0.5rem; font-weight: bold; color: #065F46;">💡 V danom období ste v zisku z predaja elektriny.</div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class="balance-card-negative">
-                    <div class="metric-label" style="color: #991B1B;">Výsledná bilancia (Výnosy - Náklady)</div>
-                    <div class="metric-value" style="color: #B91C1C;">{p_bilancia_netto} €</div>
-                    <div style="margin-top: 0.5rem; font-weight: bold; color: #991B1B;">⚠️ V danom období ste dokúpili elektrinu.</div>
-                </div>
-                """, unsafe_allow_html=True)
+            # Zobrazenie výsledných čistých bilancií
+            st.write("#### Porovnanie výslednej čistej bilancie (Výnosy - Náklady)")
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                if bilancia_spot_netto >= 0:
+                    st.markdown(f'<div class="balance-card-positive"><div class="metric-label" style="color: #065F46;">Čistá bilancia na SPOTE</div><div class="metric-value" style="color: #047857;">+ {p_bilancia_spot_netto} €</div></div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="balance-card-negative"><div class="metric-label" style="color: #991B1B;">Čistá bilancia na SPOTE</div><div class="metric-value" style="color: #B91C1C;">{p_bilancia_spot_netto} €</div></div>', unsafe_allow_html=True)
+            with col_b2:
+                if bilancia_fix_netto >= 0:
+                    st.markdown(f'<div class="balance-card-positive" style="background-color: #F3F4F6; border-left-color: #6B7280;"><div class="metric-label" style="color: #374151;">Čistá bilancia u DODÁVATEĽA (Fix)</div><div class="metric-value" style="color: #1F2937;">+ {p_bilancia_fix_netto} €</div></div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="balance-card-negative" style="background-color: #F3F4F6; border-left-color: #6B7280;"><div class="metric-label" style="color: #374151;">Čistá bilancia u DODÁVATEĽA (Fix)</div><div class="metric-value" style="color: #1F2937;">{p_bilancia_fix_netto} €</div></div>', unsafe_allow_html=True)
             
+            # --- TABUĽKA S POŽADOVANÝMI ÚDAJMI ---
             st.write("### 💶 Krok 3: Finančná bilancia (Prehľadová tabuľka)")
             p_cisty_rozdiel_kwh = (celkova_dodavka_dec - celkova_spotreba_dec).quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             
             t3_data = {
                 "Analytická položka": [
                     "Celkový Odber (Vynásobený čistou cenou zo spotu)", 
-                    "Celkový Odber (Pri vašej pôvodnej fixnej tarife)",
+                    "Celkový Odber (Vynásobený Vašou cenou od dodávateľa)",
                     "Celková Dodávka FVE (Vynásobená čistou cenou zo spotu)", 
-                    "Čistá finančná bilancia na spote (Výnosy - Náklady)"
+                    "Celková Dodávka FVE (Vynásobená Vašou cenou od dodávateľa)",
+                    "Čistá finančná bilancia na spote (Výnosy - Náklady)",
+                    "Čistá finančná bilancia u dodávateľa (Výnosy - Náklady)"
                 ],
                 "Množstvo [kWh]": [
                     f"{p_celkova_spotreba} kWh", 
                     f"{p_celkova_spotreba} kWh",
                     f"{p_celkova_dodavka} kWh", 
+                    f"{p_celkova_dodavka} kWh",
+                    f"{p_cisty_rozdiel_kwh} kWh",
                     f"{p_cisty_rozdiel_kwh} kWh"
                 ],
                 "Finančný výsledok [€]": [
                     f"- {p_naklady_spot_total} €", 
                     f"- {p_naklady_fix_total} €",
                     f"+ {p_vynosy_spot_total} €", 
-                    f"{p_bilancia_netto} €"
+                    f"+ {p_vynosy_fix_total} €",
+                    f"{p_bilancia_spot_netto} €",
+                    f"{p_bilancia_fix_netto} €"
                 ]
             }
             st.table(pd.DataFrame(t3_data))

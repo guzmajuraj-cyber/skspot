@@ -191,25 +191,34 @@ marza_dodavatela = Decimal(str(marza_dodavatela_input)) / Decimal('1000.0')
 tabs = st.tabs(["📊 Analýza a Porovnanie", "👀 Kontrola načítaných dát", "💡 Ako získať dáta?"])
 
 df_surove_okte = None 
+df_spotreba = None
+vybrany_subor_nazov = "Demo ukážka"
 
 with tabs[0]:
     col_left, col_right = st.columns([1, 2])
     with col_left:
         st.write("### 📂 Krok 1: Nahrajte dáta")
-        uploaded_file = st.file_uploader("Nahrajte export z SSD (CSV, XLSX, XLS)", type=["csv", "xlsx", "xls"])
-        use_demo = st.checkbox("Použiť Demo ukážku")
+        # ZMENA: accept_multiple_files=True umožňuje označiť a nahrať viacero mesiacov naraz
+        uploaded_files = st.file_uploader("Nahrajte exporty z SSD (Môžete vybrať viacero súborov naraz)", type=["csv", "xlsx", "xls"], accept_multiple_files=True)
+        use_demo = st.checkbox("Použiť Demo ukážku", value=not uploaded_files)
         
-    df_spotreba = None
-    if uploaded_file is not None:
-        df_spotreba = parsuj_ssd_subor(uploaded_file)
-    elif use_demo:
-        df_spotreba = vygeneruj_vzorove_data()
-        
+        # NOVINKA: Ak používateľ nahral viacero súborov, zobrazíme menu na prepínanie medzi nimi
+        if uploaded_files:
+            zoznam_suborov = {f.name: f for f in uploaded_files}
+            vybrany_subor_nazov = st.selectbox("🎯 Vyberte mesiac na analýzu:", list(zoznam_suborov.keys()))
+            aktivny_subor = zoznam_suborov[vybrany_subor_nazov]
+            df_spotreba = parsuj_ssd_subor(aktivny_subor)
+        elif use_demo:
+            df_spotreba = vygeneruj_vzorove_data()
+            vybrany_subor_nazov = "Demo ukážka (01.05 - 15.05)"
+            
     if df_spotreba is not None:
+        st.write(f"ℹ️ **Aktuálne zobrazený mesiac/súbor:** `{vybrany_subor_nazov}`")
+        
         min_date = df_spotreba.index.min()
         max_date = df_spotreba.index.max()
         
-        with st.spinner("⏳ Sťahujem spotové ceny z OKTE..."):
+        with st.spinner(f"⏳ Sťahujem spotové ceny z OKTE pre zvolené obdobie..."):
             df_surove_okte, df_ceny_parsovane = stiahni_spotove_ceny(min_date, max_date)
             
         if df_ceny_parsovane is not None:
@@ -249,7 +258,6 @@ with tabs[0]:
             uspora = naklady_fix_total - naklady_spot_total
             bilancia_netto = vynosy_spot_total - naklady_spot_total
             
-            # Formátovanie na 8 desatinných miest
             p_celkova_spotreba = celkova_spotreba_dec.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             p_celkova_dodavka = celkova_dodavka_dec.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             p_naklady_spot_total = naklady_spot_total.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
@@ -259,13 +267,11 @@ with tabs[0]:
             
             st.write("### 📈 Krok 2: Finálny verdikt")
             
-            # Zobrazenie úspory voči fixu
             if uspora > 0:
-                st.success(f"🎉 Na čistom spote by ste ušetrili **{p_uspora} EUR** voči fixnej tarife.")
+                st.success(f"🎉 Na čistom spote by ste v súbore `{vybrany_subor_nazov}` ušetrili **{p_uspora} EUR** voči fixnej tarife.")
             else:
-                st.warning(f"⚠️ Na čistom spote by ste preplatili **{abs(p_uspora)} EUR** voči fixnej tarife.")
+                st.warning(f"⚠️ Na čistom spote by ste v súbore `{vybrany_subor_nazov}` preplatili **{abs(p_uspora)} EUR** voči fixnej tarife.")
             
-            # --- ZMENENÉ ROZLOŽENIE PODĽA POŽIADAVIEK ---
             col_odber, col_dodavka = st.columns(2)
             
             with col_odber:
@@ -290,12 +296,11 @@ with tabs[0]:
                 </div>
                 """, unsafe_allow_html=True)
             
-            # Dynamický riadok: Čistá finančná bilancia
             st.write("#### Čistá finančná bilancia")
             if bilancia_netto >= 0:
                 st.markdown(f"""
                 <div class="balance-card-positive">
-                    <div class="metric-label" style="color: #065F46;">Výsledná bilancia</div>
+                    <div class="metric-label" style="color: #065F46;">Výsledná bilancia (Výnosy - Náklady)</div>
                     <div class="metric-value" style="color: #047857;">+ {p_bilancia_netto} €</div>
                     <div style="margin-top: 0.5rem; font-weight: bold; color: #065F46;">💡 V danom období ste v zisku z predaja elektriny.</div>
                 </div>
@@ -303,14 +308,12 @@ with tabs[0]:
             else:
                 st.markdown(f"""
                 <div class="balance-card-negative">
-                    <div class="metric-label" style="color: #991B1B;">Výsledná bilancia</div>
+                    <div class="metric-label" style="color: #991B1B;">Výsledná bilancia (Výnosy - Náklady)</div>
                     <div class="metric-value" style="color: #B91C1C;">{p_bilancia_netto} €</div>
                     <div style="margin-top: 0.5rem; font-weight: bold; color: #991B1B;">⚠️ V danom období ste dokúpili elektrinu.</div>
                 </div>
                 """, unsafe_allow_html=True)
             
-            # --- KONIEC ZMENENEJ SEKCIE ---
-
             st.write("### 💶 Krok 3: Finančná bilancia (Prehľadová tabuľka)")
             p_cisty_rozdiel_kwh = (celkova_dodavka_dec - celkova_spotreba_dec).quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP)
             
@@ -340,12 +343,12 @@ with tabs[0]:
             csv_buffer = io.StringIO()
             df_audit.to_csv(csv_buffer, sep=';')
             st.download_button(
-                label="📥 Stiahnuť kompletný 15-minútový report pre Excel (.csv)",
+                label=f"📥 Stiahnuť 15-minútový report pre: {vybrany_subor_nazov} (.csv)",
                 data=csv_buffer.getvalue(),
-                file_name="spotcheck_pure_spot_data.csv",
+                file_name=f"spotcheck_{vybrany_subor_nazov}.csv",
                 mime="text/csv"
             )
-           
+            
             st.write("### 📊 Priebeh spotreby a trhových cien")
             df_graf = df_final.copy()
             
@@ -373,16 +376,16 @@ with tabs[1]:
         df_view.index.name = 'Dátum a Čas (upravený pre OKTE)'
         df_view.columns = ['Odber (kWh / 15min)', 'Dodávka FVE (kWh / 15min)']
         
-        st.write("#### 📋 Kompletné namerané dáta z vášho súboru (Odber a Dodávka):")
+        st.write(f"#### 📋 Dáta z aktívneho súboru: `{vybrany_subor_nazov}`")
         st.dataframe(df_view, use_container_width=True)
         
-        st.write("#### 🔍 Surové dáta z API OKTE (Iba vybrané stĺpce):")
+        st.write("#### 🔍 Surové dáta z API OKTE pre toto obdobie:")
         if df_surove_okte is not None:
             st.dataframe(df_surove_okte, use_container_width=True, hide_index=True)
         else:
             st.error("❌ Žiadne surové dáta z OKTE neboli stiahnuté.")
     else:
-        st.warning("📂 Najprv nahrajte súbor.")
+        st.warning("📂 Najprv nahrajte aspoň jeden súbor.")
 
 with tabs[2]:
     st.write("### 💡 Ako získať dáta?")

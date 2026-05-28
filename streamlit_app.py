@@ -28,6 +28,7 @@ st.markdown("""
     .balance-card-positive { background-color: #ECFDF5; padding: 1.5rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 5px solid #10B981; }
     .balance-card-negative { background-color: #FEF2F2; padding: 1.5rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 5px solid #EF4444; }
     .period-info-card { background-color: #EFF6FF; padding: 0.75rem 1.2rem; border-radius: 0.5rem; border: 1px solid #BFDBFE; margin-top: 1.6rem; }
+    .feedback-box { background-color: #F9FAFB; padding: 2rem; border-radius: 0.5rem; border: 1px solid #E5E7EB; max-width: 600px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -181,14 +182,14 @@ st.markdown('<div class="main-title">⚡ SpotCheck Slovensko</div>', unsafe_allo
 st.markdown('<div class="sub-title">Porovnanie fixných a reálnych spotových cien z OKTE.</div>', unsafe_allow_html=True)
 
 st.sidebar.header("⚙️ Nastavenia")
-cena_fix_input = st.sidebar.slider("Vaša fixná cena komodity (centov/kWh)", 10.0, 25.0, 16.5, 0.5)
+cena_fix_input = st.sidebar.slider("Vaša fixná cena komodity (centy/kWh s DPH)", 10.0, 25.0, 16.5, 0.5)
 cena_fix_eur = Decimal(str(cena_fix_input)) / Decimal('100.0')
 
 marza_dodavatela_input = st.sidebar.slider("Marža spotového dodávateľa (EUR/MWh)", 5, 25, 15, 1)
 marza_dodavatela = Decimal(str(marza_dodavatela_input)) / Decimal('1000.0')
 
-# Pridaný štvrtý tab: "📅 Denné ceny OKTE"
-tabs = st.tabs(["📊 Analýza a Porovnanie", "👀 Kontrola načítaných dát", "💡 Ako získať dáta?", "📅 Denné ceny OKTE"])
+# Pridaný piaty tab: "💬 Spätná väzba"
+tabs = st.tabs(["📊 Analýza a Porovnanie", "👀 Kontrola načítaných dát", "💡 Ako získať dáta?", "📅 Denné ceny OKTE", "💬 Spätná väzba"])
 
 df_surove_okte = None 
 df_spotreba = None
@@ -376,7 +377,7 @@ with tabs[0]:
                 fin_graf_dict['Výnosy z dodávky (€)'] = df_graf['Vynosy_Spot_EUR']
             st.line_chart(pd.DataFrame(fin_graf_dict), height=250, color=["#FF4B4B", "#29B560"])
             
-            st.write("#### 💶 Vývoj ceny na spotovom trhu OKTE (centov/kWh)")
+            st.write("#### 💶 Vývoj ceny na spotovom trhu OKTE (centy/kWh s DPH)")
             df_graf['Spotová cena (ct/kWh)'] = df_graf['cena_eur_kwh'] * 100
             st.line_chart(df_graf[['Spotová cena (ct/kWh)']], height=200, color="#FF9F43")
 
@@ -403,43 +404,33 @@ with tabs[2]:
     st.write("### 💡 Ako získať dáta?")
     st.write("Postup stiahnutia dát z portálu SSD (Stredoslovenská distribučná)...")
 
-# --- NOVÝ TAB: NAČÍTANIE SPOTU PODĽA KALENDÁRA ---
 with tabs[3]:
     st.write("### 📅 Sledovanie denných burzových cien OKTE")
     st.write("Vyberte si ľubovoľný deň z kalendára na stiahnutie reálnych cien z krátkodobého trhu s elektrinou.")
     
-    # Výber dňa pomocou natívneho kalendára (prednastavený je dnešok)
     vybrany_den = st.date_input("📆 Zvoľte dátum:", datetime.now().date())
     
     if vybrany_den:
         with st.spinner(f"⏳ Sťahujem ceny z OKTE pre deň {vybrany_den.strftime('%d.%m.%Y')}..."):
-            # Použijeme rovnakú robustnú API funkciu pre jeden deň (od vybraného dňa do vybraného dňa)
             df_surove_den, df_parsovane_den = stiahni_spotove_ceny(vybrany_den, vybrany_den)
             
         if df_parsovane_den is not None and not df_parsovane_den.empty:
-            
-            # Priebeh ceny pre graf (chceme zobraziť v centoch za kWh)
             df_den_graf = df_parsovane_den.copy()
-            df_den_graf['Cena (centov/kWh)'] = df_den_graf['cena_eur_kwh'] * 100
-            
-            # Zmena indexu na text, aby bol graf na osi X prehľadný podľa hodín
+            df_den_graf['Cena (cent/kWh s DPH)'] = df_den_graf['cena_eur_kwh'] * 100
             df_den_graf.index = df_den_graf.index.strftime('%H:%M')
             df_den_graf.index.name = 'Hodina dňa'
             
-            st.write(f"#### 📊 Graf vývoja spotovej ceny na deň {vybrany_den.strftime('%d.%m.%Y')} (centov/kWh)")
-            st.line_chart(df_den_graf[['Cena (centov/kWh)']], height=300, color="#FF9F43")
+            st.write(f"#### 📊 Graf vývoja spotovej ceny na deň {vybrany_den.strftime('%d.%m.%Y')} (centy/kWh s DPH)")
+            st.line_chart(df_den_graf[['Cena (cent/kWh s DPH)']], height=300, color="#FF9F43")
             
             st.write("#### 📋 Tabuľkový prehľad cien po hodinách")
             
-            # Výpočet cien spätne do prehľadnej štruktúry pre audit a tabuľku
             tabulka_data = []
             if df_surove_den is not None and not df_surove_den.empty:
                 for idx, row in df_surove_den.iterrows():
                     perioda = int(row['period'])
                     cena_mwh_surova = float(row['price'])
                     
-                    # Formát štvrťhodín na celé hodiny pre lepšiu ľudskú čitateľnosť (keďže OKTE vracia 15min intervaly)
-                    # Perioda 1-4 je prvá hodina (00:00 - 01:00) atď.
                     hod_start = (perioda - 1) // 4
                     min_start = ((perioda - 1) % 4) * 15
                     cas_label = f"{hod_start:02d}:{min_start:02d}"
@@ -452,15 +443,12 @@ with tabs[3]:
                         "Perioda (OKTE)": perioda,
                         "Cena [EUR / MWh]": round(cena_mwh_surova, 2),
                         "Čistá komodita [EUR / kWh]": round(cena_kwh_cista, 5),
-                        "Cena [centov/kWh]": round(cena_kwh_centy, 3)
+                        "Cena [cent / kWh s DPH]": round(cena_kwh_centy, 3)
                     })
                 
                 df_denna_tabulka = pd.DataFrame(tabulka_data)
-                
-                # Zobrazenie interaktívnej tabuľky
                 st.dataframe(df_denna_tabulka, use_container_width=True, hide_index=True)
                 
-                # Možnosť stiahnutia jednodňového reportu
                 csv_buffer_den = io.StringIO()
                 df_denna_tabulka.to_csv(csv_buffer_den, sep=';', index=False)
                 st.download_button(
@@ -470,4 +458,40 @@ with tabs[3]:
                     mime="text/csv"
                 )
         else:
-            st.warning(f"⚠️ Pre dátum {vybrany_den.strftime('%d.%m.%Y')} zatiaľ burza OKTE nezverejnila dáta, alebo nastala chyba v komunikácii s API.")
+            st.warning(f"⚠️ Pre dátum {vybrany_den.strftime('%d.%m.%Y')} zatiaľ burza OKTE nezverejnila dáta.")
+
+# --- NOVÝ TAB: SPÄTNÁ VÄZBA ---
+with tabs[4]:
+    st.write("### 💬 Nápady, vylepšenia a spätná väzba")
+    st.write("Našli ste v aplikácii chybu, nesedia vám výpočty s faktúrou alebo by ste chceli doplniť novú funkciu? Napíšte mi.")
+    
+    st.markdown('<div class="feedback-box">', unsafe_allow_html=True)
+    
+    # 1. RIEŠENIE: HTML formulár prepojený na bezplatnú a bezpečnú službu FormSubmit
+    # Táto služba zoberie dáta z formulára a doručí ich priamo na tvoj mail bez toho, aby ohrozila kód.
+    form_html = """
+    <form action="https://formsubmit.co/guzmajuraj@gmail.com" method="POST">
+        <input type="hidden" name="_subject" value="SpotCheck SK - Nová spätná väzba!">
+        <input type="hidden" name="_honeypot" style="display:none">
+        
+        <label style="font-weight: 600; color: #374151;">Váš e-mail (nepovinné, pre odpoveď):</label><br>
+        <input type="email" name="email" placeholder="napr. Jozef@gmail.com" style="width: 100%; padding: 0.5rem; margin-bottom: 1rem; border: 1px solid #D1D5DB; border-radius: 0.375rem;"><br>
+        
+        <label style="font-weight: 600; color: #374151;">Vaša správa alebo postreh:</label><br>
+        <textarea name="message" rows="5" required placeholder="Napíšte sem váš komentár..." style="width: 100%; padding: 0.5rem; margin-bottom: 1rem; border: 1px solid #D1D5DB; border-radius: 0.375rem;"></textarea><br>
+        
+        <button type="submit" style="background-color: #2563EB; color: white; border: none; padding: 0.6rem 1.3rem; font-weight: bold; border-radius: 0.375rem; cursor: pointer;">
+            ✉️ Odoslať správu
+        </button>
+    </form>
+    """
+    st.markdown(form_html, unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 2. RIEŠENIE: Poistný mailto odkaz pre prípad, že by prehliadač blokoval externé skripty
+    st.write("")
+    st.write("---")
+    st.write("Alternatívne mi môžete poslať e-mail priamo z vašej poštovej schránky:")
+    
+    mailto_url = "mailto:guzmajuraj@gmail.com?subject=SpotCheck%20SK%20-%20Spätná%20väzba&body=Ahoj%20Juraj,%20mám%20nasledovný%20postreh%20k%20aplikácii:%20"
+    st.a(label="📧 Otvoriť môj e-mailový program a napísať správu", href=mailto_url)

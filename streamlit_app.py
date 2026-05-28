@@ -460,38 +460,42 @@ with tabs[3]:
         else:
             st.warning(f"⚠️ Pre dátum {vybrany_den.strftime('%d.%m.%Y')} zatiaľ burza OKTE nezverejnila dáta.")
 
-# --- NOVÝ TAB: SPÄTNÁ VÄZBA ---
+# --- NOVÝ TAB: SPÄTNÁ VÄZBA (OPRAVENÝ) ---
 with tabs[4]:
     st.write("### 💬 Nápady, vylepšenia a spätná väzba")
     st.write("Našli ste v aplikácii chybu, nesedia vám výpočty s faktúrou alebo by ste chceli doplniť novú funkciu? Napíšte mi.")
     
+    # Otvoríme vizuálny box pomocou Streamlit markdownu
     st.markdown('<div class="feedback-box">', unsafe_allow_html=True)
     
-    # 1. RIEŠENIE: HTML formulár prepojený na bezplatnú a bezpečnú službu FormSubmit
-    # Táto služba zoberie dáta z formulára a doručí ich priamo na tvoj mail bez toho, aby ohrozila kód.
+    # Definujeme čistý HTML formulár do premennej
     form_html = """
     <form action="https://formsubmit.co/guzmajuraj@gmail.com" method="POST">
         <input type="hidden" name="_subject" value="SpotCheck SK - Nová spätná väzba!">
         <input type="hidden" name="_honeypot" style="display:none">
         
-        <label style="font-weight: 600; color: #374151;">Váš e-mail (nepovinné, pre odpoveď):</label><br>
-        <input type="email" name="email" placeholder="napr. Jozef@gmail.com" style="width: 100%; padding: 0.5rem; margin-bottom: 1rem; border: 1px solid #D1D5DB; border-radius: 0.375rem;"><br>
+        <label style="font-weight: 600; color: #374151; font-family: inherit;">Váš e-mail (nepovinné, pre odpoveď):</label><br>
+        <input type="email" name="email" placeholder="napr. jozef@gmail.com" style="width: 100%; padding: 0.6rem; margin-top: 0.3rem; margin-bottom: 1.2rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; font-family: inherit; font-size: 0.95rem;"><br>
         
-        <label style="font-weight: 600; color: #374151;">Vaša správa alebo postreh:</label><br>
-        <textarea name="message" rows="5" required placeholder="Napíšte sem váš komentár..." style="width: 100%; padding: 0.5rem; margin-bottom: 1rem; border: 1px solid #D1D5DB; border-radius: 0.375rem;"></textarea><br>
+        <label style="font-weight: 600; color: #374151; font-family: inherit;">Vaša správa alebo postreh:</label><br>
+        <textarea name="message" rows="5" required placeholder="Napíšte sem váš komentár, nápad na vylepšenie..." style="width: 100%; padding: 0.6rem; margin-top: 0.3rem; margin-bottom: 1.2rem; border: 1px solid #D1D5DB; border-radius: 0.375rem; font-family: inherit; font-size: 0.95rem; resize: vertical;"></textarea><br>
         
-        <button type="submit" style="background-color: #2563EB; color: white; border: none; padding: 0.6rem 1.3rem; font-weight: bold; border-radius: 0.375rem; cursor: pointer;">
+        <button type="submit" style="background-color: #1E3A8A; color: white; border: none; padding: 0.7rem 1.5rem; font-weight: bold; border-radius: 0.375rem; cursor: pointer; font-family: inherit; font-size: 0.95rem; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#1D4ED8'" onmouseout="this.style.backgroundColor='#1E3A8A'">
             ✉️ Odoslať správu
         </button>
     </form>
     """
+    
+    # KLÚČOVÝ KROK: Vykreslenie formulára ako reálneho HTML, nie ako textu
     st.markdown(form_html, unsafe_allow_html=True)
+    
+    # Zatvoríme vizuálny box
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # 2. RIEŠENIE: Poistný mailto odkaz pre prípad, že by prehliadač blokoval externé skripty
+    # Alternatívny mailto odkaz pod boxom
     st.write("")
     st.write("---")
     st.write("Alternatívne mi môžete poslať e-mail priamo z vašej poštovej schránky:")
     
-    mailto_url = "mailto:guzmajuraj@gmail.com?subject=SpotCheck%20SK%20-%20Spätná%20väzba&body=Ahoj%20Juraj,%20mám%20nasledovný%20postreh%20k%20aplikácii:%20"
-    st.a(label="📧 Otvoriť môj e-mailový program a napísať správu", href=mailto_url)
+    mailto_url = "mailto:guzmajuraj@gmail.com?subject=SpotCheck%20SK%20-%20Sp%C3%A4tn%C3%A1%20v%C3%A4zba&body=Ahoj%20Juraj,%20m%C3%A1m%20nasledovn%C3%BD%20postreh%20k%20aplik%C3%A1cii:%20"
+    st.markdown(f'<a href="{mailto_url}" target="_blank" style="text-decoration: none;"><button style="background-color: #F3F4F6; color: #1F2937; border: 1px solid #D1D5DB; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 500; cursor: pointer;">📧 Otvoriť môj e-mailový program</button></a>', unsafe_allow_html=True)

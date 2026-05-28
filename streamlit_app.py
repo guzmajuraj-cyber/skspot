@@ -27,6 +27,7 @@ st.markdown("""
     .metric-label { font-size: 0.9rem; color: #6B7280; font-weight: 600; }
     .balance-card-positive { background-color: #ECFDF5; padding: 1.5rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 5px solid #10B981; }
     .balance-card-negative { background-color: #FEF2F2; padding: 1.5rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left: 5px solid #EF4444; }
+    .period-info-card { background-color: #EFF6FF; padding: 0.75rem 1.2rem; border-radius: 0.5rem; border: 1px solid #BFDBFE; margin-top: 1.6rem; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -195,28 +196,44 @@ df_spotreba = None
 vybrany_subor_nazov = "Demo ukážka"
 
 with tabs[0]:
-    col_left, col_right = st.columns([1, 2])
-    with col_left:
-        st.write("### 📂 Krok 1: Nahrajte dáta")
-        # ZMENA: accept_multiple_files=True umožňuje označiť a nahrať viacero mesiacov naraz
-        uploaded_files = st.file_uploader("Nahrajte exporty z SSD (Môžete vybrať viacero súborov naraz)", type=["csv", "xlsx", "xls"], accept_multiple_files=True)
-        use_demo = st.checkbox("Použiť Demo ukážku", value=not uploaded_files)
-        
-        # NOVINKA: Ak používateľ nahral viacero súborov, zobrazíme menu na prepínanie medzi nimi
-        if uploaded_files:
-            zoznam_suborov = {f.name: f for f in uploaded_files}
+    st.write("### 📂 Krok 1: Nahrajte dáta")
+    uploaded_files = st.file_uploader("Nahrajte exporty z SSD (Môžete vybrať viacero súborov naraz)", type=["csv", "xlsx", "xls"], accept_multiple_files=True)
+    use_demo = st.checkbox("Použiť Demo ukážku", value=not uploaded_files)
+    
+    # NOVINKA: Rozdelenie riadku pre Selectbox a Informáciu o sledovanom období
+    col_select, col_period = st.columns([1, 1])
+    
+    if uploaded_files:
+        zoznam_suborov = {f.name: f for f in uploaded_files}
+        with col_select:
             vybrany_subor_nazov = st.selectbox("🎯 Vyberte mesiac na analýzu:", list(zoznam_suborov.keys()))
-            aktivny_subor = zoznam_suborov[vybrany_subor_nazov]
-            df_spotreba = parsuj_ssd_subor(aktivny_subor)
-        elif use_demo:
-            df_spotreba = vygeneruj_vzorove_data()
-            vybrany_subor_nazov = "Demo ukážka (01.05 - 15.05)"
+        aktivny_subor = zoznam_suborov[vybrany_subor_nazov]
+        df_spotreba = parsuj_ssd_subor(aktivny_subor)
+    elif use_demo:
+        df_spotreba = vygeneruj_vzorove_data()
+        vybrany_subor_nazov = "Demo ukážka"
+        with col_select:
+            # Neaktívny selectbox pri demo dátach, aby držal vizuálnu štruktúru
+            st.selectbox("🎯 Vyberte mesiac na analýzu:", ["Demo ukážka"], disabled=True)
             
     if df_spotreba is not None:
-        st.write(f"ℹ️ **Aktuálne zobrazený mesiac/súbor:** `{vybrany_subor_nazov}`")
-        
         min_date = df_spotreba.index.min()
         max_date = df_spotreba.index.max()
+        
+        # Sformátovanie dátumov pre zobrazenie
+        str_od_zobrazenie = min_date.strftime("%d.%m.%Y %H:%M")
+        str_do_zobrazenie = max_date.strftime("%d.%m.%Y %H:%M")
+        
+        # Vpísanie sledovaného obdobia vedľa výberového menu
+        with col_period:
+            st.markdown(f"""
+            <div class="period-info-card">
+                <span style="color: #1E40AF; font-weight: bold;">📅 Sledované obdobie:</span> 
+                <span style="color: #1E1B4B;">{str_od_zobrazenie}</span> 
+                <span style="color: #6B7280;">&nbsp;až&nbsp;</span> 
+                <span style="color: #1E1B4B;">{str_do_zobrazenie}</span>
+            </div>
+            """, unsafe_allow_html=True)
         
         with st.spinner(f"⏳ Sťahujem spotové ceny z OKTE pre zvolené obdobie..."):
             df_surove_okte, df_ceny_parsovane = stiahni_spotove_ceny(min_date, max_date)
@@ -270,7 +287,7 @@ with tabs[0]:
             if uspora > 0:
                 st.success(f"🎉 Na čistom spote by ste v súbore `{vybrany_subor_nazov}` ušetrili **{p_uspora} EUR** voči fixnej tarife.")
             else:
-                st.warning(f"⚠️ Na čistom spote by ste v súbore `{vybrany_subor_nazov}` preplatili **{abs(p_uspora)} EUR** voči fixnej tarife.")
+                st.warning(f"⚠️ Na čistom spote by ste v súbore `{vybrany_subor_nazov}` preplatili **{abs(p_uspora} EUR** voči fixnej tarife.")
             
             col_odber, col_dodavka = st.columns(2)
             
@@ -369,7 +386,7 @@ with tabs[0]:
             st.line_chart(df_graf[['Spotová cena (ct/kWh)']], height=200, color="#FF9F43")
 
 with tabs[1]:
-    st.write("### 👀 Kontrola spracovaných dát")
+    st.write("### 👀 Kontrola načítaných dát")
     if df_spotreba is not None:
         df_view = df_spotreba.copy()
         df_view.index = df_view.index.strftime('%Y-%m-%d %H:%M:%S')

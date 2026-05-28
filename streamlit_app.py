@@ -287,7 +287,7 @@ with tabs[0]:
             if uspora > 0:
                 st.success(f"🎉 Na čistom spote by ste v súbore `{vybrany_subor_nazov}` ušetrili **{p_uspora} EUR** voči fixnej tarife.")
             else:
-                st.warning(f"⚠️ Na čistom spote by ste v súbore `{vybrany_subor_nazov}` preplatili **{abs(p_uspora} EUR** voči fixnej tarife.")
+                st.warning(f"⚠️ Na čistom spote by ste v súbore `{vybrany_subor_nazov}` preplatili **{abs(p_uspora)} EUR** voči fixnej tarife.")
             
             col_odber, col_dodavka = st.columns(2)
             

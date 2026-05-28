@@ -460,16 +460,14 @@ with tabs[3]:
         else:
             st.warning(f"⚠️ Pre dátum {vybrany_den.strftime('%d.%m.%Y')} zatiaľ burza OKTE nezverejnila dáta.")
 
-# --- NOVÝ TAB: SPÄTNÁ VÄZBA (DEFINITÍVNA OPRAVA) ---
+# --- NOVÝ TAB: SPÄTNÁ VÄZBA (ODSTRÁNENÉ NEAKTÍVNE POLE) ---
 with tabs[4]:
     st.write("### 💬 Nápady, vylepšenia a spätná väzba")
     st.write("Našli ste v aplikácii chybu, nesedia vám výpočty s faktúrou alebo by ste chceli doplniť novú funkciu? Napíšte mi.")
     
-    st.markdown('<div class="feedback-box">', unsafe_allow_html=True)
-    
-    # HTML kód spojený do jedného riadku, aby ho Streamlit nezachytil ako čistý text
+    # HTML kód spojený do jedného riadku – štýl rámčeka sme presunuli priamo do tagu <form>
     form_html_jednoradkovy = (
-        '<form action="https://formsubmit.co/guzmajuraj@gmail.com" method="POST">'
+        '<form action="https://formsubmit.co/guzmajuraj@gmail.com" method="POST" style="background-color: #F9FAFB; padding: 2rem; border-radius: 0.5rem; border: 1px solid #E5E7EB; max-width: 600px;">'
         '<input type="hidden" name="_subject" value="SpotCheck SK - Nova spatna vazba!">'
         '<input type="hidden" name="_honeypot" style="display:none">'
         '<label style="font-weight: 600; color: #374151; font-family: inherit;">Váš e-mail (nepovinné, pre odpoveď):</label><br>'
@@ -480,10 +478,8 @@ with tabs[4]:
         '</form>'
     )
     
-    # Vykreslenie formulára
+    # Vykreslenie vyčisteného formulára
     st.markdown(form_html_jednoradkovy, unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
     
     # Alternatívny mailto odkaz pod boxom
     st.write("")

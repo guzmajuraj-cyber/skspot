@@ -181,7 +181,7 @@ st.markdown('<div class="main-title">⚡ SpotCheck Slovensko</div>', unsafe_allo
 st.markdown('<div class="sub-title">Porovnanie fixných a reálnych spotových cien z OKTE.</div>', unsafe_allow_html=True)
 
 st.sidebar.header("⚙️ Nastavenia")
-cena_fix_input = st.sidebar.slider("Vaša fixná cena komodity (centy/kWh s DPH)", 10.0, 25.0, 16.5, 0.5)
+cena_fix_input = st.sidebar.slider("Vaša fixná cena komodity (centov/kWh)", 10.0, 25.0, 16.5, 0.5)
 cena_fix_eur = Decimal(str(cena_fix_input)) / Decimal('100.0')
 
 marza_dodavatela_input = st.sidebar.slider("Marža spotového dodávateľa (EUR/MWh)", 5, 25, 15, 1)
@@ -376,7 +376,7 @@ with tabs[0]:
                 fin_graf_dict['Výnosy z dodávky (€)'] = df_graf['Vynosy_Spot_EUR']
             st.line_chart(pd.DataFrame(fin_graf_dict), height=250, color=["#FF4B4B", "#29B560"])
             
-            st.write("#### 💶 Vývoj ceny na spotovom trhu OKTE (centy/kWh s DPH)")
+            st.write("#### 💶 Vývoj ceny na spotovom trhu OKTE (centov/kWh)")
             df_graf['Spotová cena (ct/kWh)'] = df_graf['cena_eur_kwh'] * 100
             st.line_chart(df_graf[['Spotová cena (ct/kWh)']], height=200, color="#FF9F43")
 
@@ -418,15 +418,15 @@ with tabs[3]:
             
         if df_parsovane_den is not None and not df_parsovane_den.empty:
             
-            # Priebeh ceny pre graf (chceme zobraziť v centoch za kWh s DPH)
+            # Priebeh ceny pre graf (chceme zobraziť v centoch za kWh)
             df_den_graf = df_parsovane_den.copy()
-            df_den_graf['Cena (cent/kWh s DPH)'] = df_den_graf['cena_eur_kwh'] * 100
+            df_den_graf['Cena (centov/kWh)'] = df_den_graf['cena_eur_kwh'] * 100
             
             # Zmena indexu na text, aby bol graf na osi X prehľadný podľa hodín
             df_den_graf.index = df_den_graf.index.strftime('%H:%M')
             df_den_graf.index.name = 'Hodina dňa'
             
-            st.write(f"#### 📊 Graf vývoja spotovej ceny na deň {vybrany_den.strftime('%d.%m.%Y')} (centy/kWh s DPH)")
+            st.write(f"#### 📊 Graf vývoja spotovej ceny na deň {vybrany_den.strftime('%d.%m.%Y')} (centov/kWh)")
             st.line_chart(df_den_graf[['Cena (cent/kWh s DPH)']], height=300, color="#FF9F43")
             
             st.write("#### 📋 Tabuľkový prehľad cien po hodinách")
@@ -452,7 +452,7 @@ with tabs[3]:
                         "Perioda (OKTE)": perioda,
                         "Cena [EUR / MWh]": round(cena_mwh_surova, 2),
                         "Čistá komodita [EUR / kWh]": round(cena_kwh_cista, 5),
-                        "Cena [cent / kWh s DPH]": round(cena_kwh_centy, 3)
+                        "Cena [centov/kWh]": round(cena_kwh_centy, 3)
                     })
                 
                 df_denna_tabulka = pd.DataFrame(tabulka_data)

@@ -427,7 +427,7 @@ with tabs[3]:
             df_den_graf.index.name = 'Hodina dňa'
             
             st.write(f"#### 📊 Graf vývoja spotovej ceny na deň {vybrany_den.strftime('%d.%m.%Y')} (centov/kWh)")
-            st.line_chart(df_den_graf[['Cena (cent/kWh s DPH)']], height=300, color="#FF9F43")
+            st.line_chart(df_den_graf[['Cena (centov/kWh)']], height=300, color="#FF9F43")
             
             st.write("#### 📋 Tabuľkový prehľad cien po hodinách")
             
